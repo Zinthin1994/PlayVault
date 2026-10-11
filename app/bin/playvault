@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Starts the PlayVault UI. Used by the Steam library tile and the desktop entry.
+HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+APP="$(dirname "$HERE")"
+ROOT="${PLAYVAULT_HOME:-$(dirname "$APP")}"
+export PLAYVAULT_ROOT="$ROOT" PLAYVAULT_APP="$APP" PLAYVAULT_HOME="$ROOT"
+mkdir -p "$ROOT/data/logs"
+exec "$ROOT/electron/electron" --no-sandbox --ozone-platform=x11 "$APP/electron" "$@" \
+  >>"$ROOT/data/logs/electron.log" 2>&1

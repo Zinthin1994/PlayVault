@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Launches one game (Epic or GOG):  playvault-launch <app_name> [game args]
+# Steam library tiles created by PlayVault point here.
+HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+APP="$(dirname "$HERE")"
+ROOT="${PLAYVAULT_HOME:-$(dirname "$APP")}"
+export PLAYVAULT_HOME="$ROOT"
+export PYTHONPATH="$APP"
+exec "$ROOT/venv/bin/python" -m evault.launcher "$@"

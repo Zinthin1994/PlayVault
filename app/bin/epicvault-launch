@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Compatibility shim: Steam tiles made before the PlayVault rename point here.
+exec "$(dirname "$(readlink -f "$0")")/playvault-launch" "$@"

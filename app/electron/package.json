@@ -1,0 +1,8 @@
+{
+  "name": "playvault",
+  "productName": "PlayVault",
+  "version": "1.1.0",
+  "description": "Controller-first Epic Games Store + GOG library for SteamOS Game Mode",
+  "main": "main.js",
+  "license": "MIT"
+}

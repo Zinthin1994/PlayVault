@@ -13,10 +13,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from . import VERSION, gog, legendary, paths, proton, ratings as ratings_mod, steam, store, system, umu
 from .jobs import JobManager
+from .updater import Updater
 from .util import read_json, write_json, pid_alive, log
 
 IDLE_EXIT_SECONDS = 150
 STEAM_CDN = 'https://shared.akamai.steamstatic.com/store_item_assets/steam/apps'
+ALLOWED_HOSTS = {f'127.0.0.1:{paths.PORT}', f'localhost:{paths.PORT}'}
+ALLOWED_ORIGINS = {f'http://{h}' for h in ALLOWED_HOSTS}
 
 
 def epic_img(url, w=None, h=None):
@@ -55,6 +58,8 @@ class App:
         self.ratings.lang = s.get('reviews_language', 'english')
         self.ratings.enabled = s.get('ratings_enabled', True)
         self.jobs = JobManager(on_change=self.bump, on_done=self.on_job_done)
+        self.updater = Updater(on_change=self.bump)
+        self.updater.start()
         threading.Thread(target=self._startup, daemon=True).start()
         threading.Thread(target=self._watchdog, daemon=True).start()
 
@@ -516,8 +521,17 @@ class App:
             'jobs_active': len(active),
             'job_current': next((j for j in active if j['status'] == 'running'), None),
             'steam_pending': steam.pending_count(),
+            'update': self.updater.snapshot(),
             'settings': s,
         }
+
+    def busy_reason(self):
+        """Why PlayVault can't restart right now (None if it can)."""
+        if self.jobs.busy():
+            return 'A download is in progress'
+        if self.running():
+            return 'A game is running'
+        return None
 
     def system_info(self):
         uid, ud = steam.current_user()
@@ -580,11 +594,32 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         self._dispatch('POST')
 
+    def _allowed(self, api):
+        """Only PlayVault itself may use the API: its own window, the Electron shell and local
+        scripts. Web pages open in a browser on the same machine must not be able to drive it.
+        - Host must be our own address (defeats DNS rebinding).
+        - Browsers send Origin / Sec-Fetch-Site on cross-site requests; those are refused.
+          Local tools (curl, Python, Node) send neither and are allowed."""
+        host = (self.headers.get('Host') or '').lower()
+        if host not in ALLOWED_HOSTS:
+            return False
+        if not api:
+            return True
+        origin = self.headers.get('Origin')
+        if origin is not None and origin.lower() not in ALLOWED_ORIGINS:
+            return False
+        site = (self.headers.get('Sec-Fetch-Site') or '').lower()
+        return site in ('', 'same-origin', 'none')
+
     def _dispatch(self, method):
-        APP.last_request = time.time()
         url = urllib.parse.urlparse(self.path)
         parts = [urllib.parse.unquote(p) for p in url.path.split('/') if p]
         query = dict(urllib.parse.parse_qsl(url.query))
+        if not self._allowed(bool(parts) and parts[0] == 'api'):
+            log.warning('Refused %s %s (Host=%r Origin=%r)', method, url.path,
+                        self.headers.get('Host'), self.headers.get('Origin'))
+            return self._send(403, {'error': 'forbidden'})
+        APP.last_request = time.time()
         if not parts or parts[0] != 'api':
             if method == 'GET':
                 return self._static(url.path)
@@ -652,6 +687,8 @@ def route(method, p, q, body):
             return a.system_info()
         if p == ['auth', 'gog', 'url']:
             return {'url': gog.LOGIN_URL}
+        if p == ['update']:
+            return a.updater.snapshot()
         return None
 
     # POST
@@ -773,6 +810,22 @@ def route(method, p, q, body):
         a.bump()
         return {'ok': True}
     if p == ['quit']:
+        threading.Timer(0.3, lambda: os._exit(0)).start()
+        return {'ok': True}
+    if p == ['update', 'check']:
+        dl = body.get('download')
+        if dl is None:
+            dl = store.get_settings().get('app_updates', 'auto') == 'auto'
+        _bg(a.updater.check, bool(dl))
+        return a.updater.snapshot()
+    if p == ['update', 'confirm']:
+        return a.updater.confirm()
+    if p == ['update', 'prepare']:
+        # bin/playvault asks before swapping in a downloaded update: exit if idle
+        reason = a.busy_reason()
+        if reason:
+            return {'ok': False, 'reason': reason}
+        log.info('Exiting so a PlayVault update can be installed')
         threading.Timer(0.3, lambda: os._exit(0)).start()
         return {'ok': True}
     return None

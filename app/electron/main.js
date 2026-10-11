@@ -210,11 +210,22 @@ ipcMain.handle('launch', (e, appName) => {
   child.unref();
   return { ok: true };
 });
-ipcMain.handle('info', () => ({
-  gameMode: (process.env.XDG_CURRENT_DESKTOP || '').toLowerCase() === 'gamescope'
-    || !!process.env.GAMESCOPE_WAYLAND_DISPLAY || process.env.SteamGamepadUI === '1',
-}));
+const inGameMode = () => (process.env.XDG_CURRENT_DESKTOP || '').toLowerCase() === 'gamescope'
+  || !!process.env.GAMESCOPE_WAYLAND_DISPLAY || process.env.SteamGamepadUI === '1';
+ipcMain.handle('info', () => ({ gameMode: inGameMode() }));
 ipcMain.handle('quit', () => app.quit());
+// Restart to install a downloaded update (bin/playvault swaps it in on start). In Game Mode
+// Steam has to start PlayVault again from its tile, otherwise it wouldn't be shown, so the
+// app just closes there and returns { reopen: true }.
+ipcMain.handle('restart', () => {
+  const script = path.join(APP_DIR, 'bin', 'playvault');
+  const reopen = inGameMode() || process.platform !== 'linux' || !fs.existsSync(script);
+  if (!reopen) {
+    spawn('bash', ['-c', 'sleep 2; exec "$0"', script], { cwd: ROOT, detached: true, stdio: 'ignore' }).unref();
+  }
+  setTimeout(() => app.quit(), 300);
+  return { reopen };
+});
 ipcMain.handle('toggle-fullscreen', () => win && win.setFullScreen(!win.isFullScreen()));
 
 // ------------------------------------------------------------------ hide while playing

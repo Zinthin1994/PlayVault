@@ -10,7 +10,7 @@ if pgrep -x steam >/dev/null; then
 fi
 pkill -f "$ROOT/electron/electron" 2>/dev/null || true
 systemctl --user stop playvault-backend 2>/dev/null || true
-rm -rf "$ROOT/app" "$ROOT/venv" "$ROOT/umu" "$ROOT/gogdl" "$ROOT/electron"
+rm -rf "$ROOT/app" "$ROOT/app.prev" "$ROOT/update" "$ROOT/venv" "$ROOT/umu" "$ROOT/gogdl" "$ROOT/electron"
 rm -f "$HOME/.local/share/applications/playvault.desktop" "$HOME/.local/share/applications/epicvault.desktop"
 [ -L "$HOME/.local/share/epicvault" ] && rm -f "$HOME/.local/share/epicvault"
 if [ "${1:-}" = "--all" ]; then

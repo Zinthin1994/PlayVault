@@ -30,6 +30,7 @@ DEFAULT_SETTINGS = {
     'gog_language': 'en-US',
     'reviews_language': 'english',     # Steam review score language ('all' = every language)
     'gog_prefer_linux': False,         # GOG games with both builds: native Linux instead of Windows + Proton
+    'app_updates': 'auto',             # PlayVault updates: 'auto' (download, install on next start), 'ask', 'off'
 }
 
 DEFAULT_GAME = {

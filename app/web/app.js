@@ -299,6 +299,10 @@ const ACTIONS = {
   logout: async () => { if (await confirmBox({ title: 'Sign out of Epic?', msg: 'Installed games stay on disk.', ok: 'Sign out', danger: true })) { await safe(() => api('auth/logout', {})); tick(); } },
   quit: () => doQuit(),
   exit: () => confirmExit(),
+  updateCheck: () => safe(() => api('update/check', {}), 'Checking for PlayVault updates...'),
+  updateDownload: () => safe(() => api('update/check', { download: true }), 'Downloading the PlayVault update...'),
+  updateRestart: () => updateRestart(),
+  updateNotes: () => updateNotes(),
   showLog: (d) => showLog(d.app),
   noop: () => {},
 };
@@ -432,6 +436,7 @@ async function tick() {
   if (first) {
     S.filter = st.settings.filter || 'all';
     S.sort = st.settings.sort || 'title';
+    confirmUpdate();
   }
   document.body.classList.toggle('cards-small', st.settings.card_size === 'small');
   document.body.classList.toggle('cards-large', st.settings.card_size === 'large');
@@ -706,6 +711,7 @@ function libTopHtml() {
       Steam needs a quick restart to show new game tiles.</div>
       <button class="btn primary small focusable" data-action="steamApply" data-fid="ban:steam">Restart Steam now</button></div>`;
   }
+  banners += updateBannerHtml(st.update);
   if (st.library.refreshing) banners += `<div class="banner"><div class="spinner"></div><div class="grow">Syncing your ${[st.accounts.epic && 'Epic', st.accounts.gog && 'GOG'].filter(Boolean).join(' and ')} library...</div></div>`;
   if (st.library.error) banners += `<div class="banner error"><div class="grow">Library sync failed: ${esc(st.library.error)}</div>
     <button class="btn small focusable" data-action="refreshLib" data-fid="ban:retry">Retry</button></div>`;
@@ -1212,6 +1218,72 @@ function accountsHtml() {
   </div>`;
 }
 
+// ================================================================ PlayVault updates
+async function confirmUpdate() {
+  // tells bin/playvault the new version started fine (otherwise it rolls back)
+  const r = await api('update/confirm', {}).catch(() => null);
+  if (r && r.updated) toast(`PlayVault updated to ${r.updated}`, 'good');
+}
+function updateStatusText(u) {
+  if (!u) return '';
+  const v = esc(u.latest || '');
+  const msg = {
+    idle: 'Not checked yet',
+    checking: 'Checking GitHub...',
+    uptodate: `You have the latest version · checked ${fmtAgo(u.checked).toLowerCase()}`,
+    available: `PlayVault ${v} is available`,
+    downloading: `Downloading PlayVault ${v}... ${u.progress || 0}%`,
+    ready: `PlayVault ${v} is downloaded and installs the next time PlayVault starts`,
+    needs_installer: `PlayVault ${v} needs a fresh install - run the install command from the GitHub page again`,
+    failed: `PlayVault ${v} didn't start and was rolled back - waiting for a newer version`,
+    error: `Last check failed: ${esc(u.error || 'unknown error')}`,
+  }[u.status] || '';
+  return `Installed: ${esc(u.current)} · ${msg}`;
+}
+function updateBannerHtml(u) {
+  if (!u) return '';
+  const v = esc(u.latest || '');
+  if (u.status === 'ready') {
+    return `<div class="banner info"><div class="grow"><b>PlayVault ${v} is ready.</b> It installs the next time you open PlayVault.</div>
+      <button class="btn primary small focusable" data-action="updateRestart" data-fid="ban:update">Restart now</button></div>`;
+  }
+  if (u.status === 'available') {
+    return `<div class="banner info"><div class="grow"><b>PlayVault ${v} is available.</b></div>
+      ${u.notes ? `<button class="btn small focusable" data-action="updateNotes" data-fid="ban:notes">What's new</button>` : ''}
+      <button class="btn primary small focusable" data-action="updateDownload" data-fid="ban:update">Download</button></div>`;
+  }
+  if (u.status === 'downloading') {
+    return `<div class="banner"><div class="spinner"></div><div class="grow">Downloading PlayVault ${v}... ${u.progress || 0}%</div></div>`;
+  }
+  if (u.status === 'needs_installer') {
+    return `<div class="banner info"><div class="grow"><b>PlayVault ${v} is out</b> but needs a fresh install: in Desktop Mode, run the
+      install command from the PlayVault GitHub page again.</div></div>`;
+  }
+  return '';
+}
+function updateNotes() {
+  const u = S.state.update || {};
+  openModal({
+    title: `What's new in PlayVault ${u.latest || ''}`, body: `<div class="logbox">${esc(u.notes || 'No release notes.')}</div>`,
+    foot: `<button class="btn primary focusable" data-action="m" data-k="close" data-fid="close" data-autofocus>Close</button>`,
+    handlers: { close: () => closeModal() },
+  });
+}
+async function updateRestart() {
+  const st = S.state;
+  if (st.jobs_active) return toast('Wait for downloads to finish (or cancel them), then restart', 'error');
+  if (st.running) return toast('Close the game first, then restart', 'error');
+  const gm = window.vault && window.vault.info ? (await window.vault.info()).gameMode : false;
+  const ok = await confirmBox({
+    title: `Install PlayVault ${st.update.latest}?`, ok: 'Restart now',
+    msg: gm ? 'PlayVault will close. Open it again from your Steam library to finish the update.'
+      : 'PlayVault will close and open again with the new version.',
+  });
+  if (!ok) return;
+  if (window.vault && window.vault.restart) await window.vault.restart();
+  else doQuit();
+}
+
 // ================================================================ settings view
 const COUNTRIES = [['us', 'United States'], ['gb', 'United Kingdom'], ['ca', 'Canada'], ['au', 'Australia'], ['de', 'Germany'], ['fr', 'France'],
   ['es', 'Spain'], ['it', 'Italy'], ['nl', 'Netherlands'], ['se', 'Sweden'], ['br', 'Brazil'], ['mx', 'Mexico'], ['jp', 'Japan'], ['in', 'India']];
@@ -1270,6 +1342,12 @@ function settingsHtml() {
     <div class="setting focusable" data-action="tab" data-tab="accounts" data-fid="s:accounts"><div class="grow"><div class="t">Epic & GOG accounts</div>
       <div class="d">${[acc.epic && `Epic: ${esc(acc.epic)}`, acc.gog && `GOG: ${esc(acc.gog)}`].filter(Boolean).join(' · ') || 'Not signed in'}</div></div>
       <span class="btn small">Manage</span></div>
+    <h3>PlayVault updates</h3>
+    ${sel('app_updates', 'Automatic updates', 'New PlayVault versions from GitHub', { auto: 'Download automatically', ask: 'Ask first', off: 'Off' }[s.app_updates] || 'Download automatically')}
+    ${act('updateCheck', 'Check for updates', updateStatusText(S.state.update), 'Check now')}
+    ${S.state.update && S.state.update.status === 'available' ? act('updateDownload', `Download PlayVault ${esc(S.state.update.latest)}`, 'Downloads in the background, then installs the next time PlayVault starts', 'Download', 'primary') : ''}
+    ${S.state.update && S.state.update.status === 'ready' ? act('updateRestart', `Install PlayVault ${esc(S.state.update.latest)}`, 'Restarts PlayVault with the new version', 'Restart now', 'primary') : ''}
+    ${S.state.update && S.state.update.notes && ['available', 'ready', 'needs_installer'].includes(S.state.update.status) ? act('updateNotes', "What's new", `Release notes for PlayVault ${esc(S.state.update.latest)}`, 'Show') : ''}
     <h3>About</h3>
     <div class="setting focusable" data-action="noop" data-fid="s:about"><div class="grow"><div class="t">PlayVault ${esc(S.state.app_version)}</div>
       <div class="d">legendary ${esc(sys.legendary_version || '?')} · gogdl ${esc(sys.gogdl_version || 'missing')} · umu ${sys.umu_path ? 'installed' : 'missing'} · Python ${esc(sys.python || '?')} ·
@@ -1299,6 +1377,11 @@ async function editSetting(key) {
     v = await choose({ title: 'Steam review score', options: [
       { value: 'english', label: 'English reviews', desc: 'Matches the score Steam shows you on its store page', selected: s.reviews_language !== 'all' },
       { value: 'all', label: 'All languages', desc: 'Counts every review worldwide (more reviews, can differ from Steam\'s page)', selected: s.reviews_language === 'all' }] });
+  } else if (key === 'app_updates') {
+    v = await choose({ title: 'PlayVault updates', options: [
+      { value: 'auto', label: 'Download automatically', desc: 'Downloads new versions in the background; they install the next time you open PlayVault', selected: (s.app_updates || 'auto') === 'auto' },
+      { value: 'ask', label: 'Ask first', desc: 'Shows a banner when a new version is out; you choose when to download it', selected: s.app_updates === 'ask' },
+      { value: 'off', label: 'Off', desc: 'Never checks on its own (you can still use Check now)', selected: s.app_updates === 'off' }] });
   } else if (key === 'country') {
     v = await choose({ title: 'Steam store region', options: COUNTRIES.map(([c, n]) => ({ value: c, label: n, selected: c === s.country })) });
   } else if (key === 'card_size') {

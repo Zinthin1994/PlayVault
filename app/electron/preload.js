@@ -6,5 +6,6 @@ contextBridge.exposeInMainWorld('vault', {
   launch: (appName) => ipcRenderer.invoke('launch', appName),
   info: () => ipcRenderer.invoke('info'),
   quit: () => ipcRenderer.invoke('quit'),
+  restart: () => ipcRenderer.invoke('restart'),
   toggleFullscreen: () => ipcRenderer.invoke('toggle-fullscreen'),
 });

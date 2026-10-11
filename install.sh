@@ -66,6 +66,8 @@ sed -i 's/\r$//' "$ROOT/app.new/bin/"*
 chmod +x "$ROOT/app.new/bin/"*
 rm -rf "$ROOT/app"
 mv "$ROOT/app.new" "$ROOT/app"
+# a manual install replaces any self-update that was downloaded or half-installed
+rm -rf "$ROOT/update" "$ROOT/app.prev"
 
 # ------------------------------------------------------------------ python + legendary
 bold "Setting up Python environment with legendary (Epic client)"

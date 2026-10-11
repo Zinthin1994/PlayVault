@@ -35,6 +35,14 @@ Upgrading from EpicVault: just run the new installer - it moves everything to
 playtime are kept).
 `bash uninstall.sh` removes the app (games stay; `--all` also deletes data/prefixes).
 
+### Updates
+PlayVault updates itself from this repo's [releases](https://github.com/Zinthin1994/PlayVault/releases).
+It checks every few hours, downloads a new version in the background, verifies its SHA-256
+checksum, and installs it the next time you open PlayVault (never during a download or while a
+game is running). If a new version fails to start twice, it goes back to the previous one.
+Change this in Settings > *PlayVault updates* (Download automatically / Ask first / Off).
+Versions before 1.2.0 can't update themselves: install 1.2.0 once with the command above.
+
 ### Controls
 | Button | Action |
 |---|---|

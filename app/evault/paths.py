@@ -7,6 +7,8 @@ Installed layout (default ROOT = ~/.local/share/playvault):
     ROOT/umu        umu-launcher zipapp (umu-run)
     ROOT/electron   Electron runtime
     ROOT/data       everything the app writes
+    ROOT/update     a downloaded PlayVault update waiting to be installed (see updater.py)
+    ROOT/app.prev   the previous version, kept for rollback after an update
 """
 import os
 
@@ -41,7 +43,16 @@ GOG_INSTALLED = os.path.join(GOG, 'installed.json')
 GOG_BUILDS = os.path.join(GOG, 'builds.json')
 GOG_SAVES = os.path.join(GOG, 'saves.json')
 
-LEGENDARY_BIN = os.path.join(ROOT, 'venv', 'bin', 'legendary')
+UPDATE_DIR = os.path.join(ROOT, 'update')
+UPDATE_STAGED = os.path.join(UPDATE_DIR, 'app')          # unpacked app/ of the new version
+UPDATE_READY = os.path.join(UPDATE_DIR, 'ready.json')    # staged and verified: bin/playvault swaps it in
+UPDATE_TRIAL = os.path.join(UPDATE_DIR, 'trial.json')    # swapped in, not yet confirmed working
+UPDATE_TRIES = os.path.join(UPDATE_DIR, 'trial.tries')
+UPDATE_FAILED = os.path.join(UPDATE_DIR, 'failed.json')  # rolled back: don't offer this version again
+UPDATE_STATE = os.path.join(DATA, 'update.json')
+ELECTRON_VERSION_FILE = os.path.join(ROOT, 'electron', '.version')
+
+LEGENDARY_BIN =os.path.join(ROOT, 'venv', 'bin', 'legendary')
 VENV_PYTHON = os.path.join(ROOT, 'venv', 'bin', 'python')
 GOGDL_BIN = os.path.join(ROOT, 'gogdl', 'gogdl')
 UMU_RUN = os.path.join(ROOT, 'umu', 'umu-run')

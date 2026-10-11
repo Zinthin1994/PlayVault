@@ -7,7 +7,7 @@ import urllib.request
 
 log = logging.getLogger('playvault')
 
-USER_AGENT = 'PlayVault/1.1 (personal SteamOS launcher)'
+USER_AGENT = 'PlayVault/1.2 (personal SteamOS launcher)'
 
 
 def read_json(path, default=None):

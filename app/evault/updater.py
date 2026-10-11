@@ -1,6 +1,7 @@
 """PlayVault self-update from GitHub releases.
 
-The backend checks the latest release of the PlayVault repo, downloads PlayVault.tar.gz,
+Checks only happen when PlayVault opens (the UI asks once at startup) or when the user picks
+Check now - there are no background or periodic checks. The backend looks up the latest release of the PlayVault repo, downloads PlayVault.tar.gz,
 verifies it against the SHA-256 digest GitHub publishes for the asset and unpacks the new
 app/ into ROOT/update/app. Nothing that is running is touched: bin/playvault swaps the staged
 version in the next time PlayVault starts (when nothing is downloading or playing), keeps the
@@ -19,13 +20,12 @@ import threading
 import time
 import urllib.request
 
-from . import VERSION, paths, store
+from . import VERSION, paths
 from .util import USER_AGENT, log, read_json, write_json
 
 REPO = os.environ.get('PLAYVAULT_UPDATE_REPO') or 'Zinthin1994/PlayVault'
 API = (os.environ.get('PLAYVAULT_UPDATE_API') or 'https://api.github.com').rstrip('/')
 ASSET = 'PlayVault.tar.gz'
-CHECK_EVERY = 6 * 3600
 MAX_SIZE = 50 * 1024 * 1024
 
 
@@ -93,21 +93,6 @@ class Updater:
     def _failed(version):
         f = read_json(paths.UPDATE_FAILED, None) or {}
         return f.get('version') == version
-
-    # ------------------------------------------------------------ background loop
-    def start(self):
-        threading.Thread(target=self._loop, daemon=True).start()
-
-    def _loop(self):
-        time.sleep(20)  # let the library and ratings start first
-        while True:
-            try:
-                mode = store.get_settings().get('app_updates', 'auto')
-                if mode != 'off' and time.time() - self.checked > CHECK_EVERY:
-                    self.check(download=(mode == 'auto'))
-            except Exception as e:
-                log.warning('Update check failed: %r', e)
-            time.sleep(600)
 
     # ------------------------------------------------------------ check / download
     def check(self, download=False):

@@ -1223,6 +1223,8 @@ async function confirmUpdate() {
   // tells bin/playvault the new version started fine (otherwise it rolls back)
   const r = await api('update/confirm', {}).catch(() => null);
   if (r && r.updated) toast(`PlayVault updated to ${r.updated}`, 'good');
+  // the one automatic update check: when PlayVault opens (skipped if updates are Off)
+  api('update/check', { startup: true }).catch(() => {});
 }
 function updateStatusText(u) {
   if (!u) return '';
@@ -1343,7 +1345,7 @@ function settingsHtml() {
       <div class="d">${[acc.epic && `Epic: ${esc(acc.epic)}`, acc.gog && `GOG: ${esc(acc.gog)}`].filter(Boolean).join(' · ') || 'Not signed in'}</div></div>
       <span class="btn small">Manage</span></div>
     <h3>PlayVault updates</h3>
-    ${sel('app_updates', 'Automatic updates', 'New PlayVault versions from GitHub', { auto: 'Download automatically', ask: 'Ask first', off: 'Off' }[s.app_updates] || 'Download automatically')}
+    ${sel('app_updates', 'Automatic updates', 'Checks GitHub for new PlayVault versions when PlayVault opens', { auto: 'Download automatically', ask: 'Ask first', off: 'Off' }[s.app_updates] || 'Download automatically')}
     ${act('updateCheck', 'Check for updates', updateStatusText(S.state.update), 'Check now')}
     ${S.state.update && S.state.update.status === 'available' ? act('updateDownload', `Download PlayVault ${esc(S.state.update.latest)}`, 'Downloads in the background, then installs the next time PlayVault starts', 'Download', 'primary') : ''}
     ${S.state.update && S.state.update.status === 'ready' ? act('updateRestart', `Install PlayVault ${esc(S.state.update.latest)}`, 'Restarts PlayVault with the new version', 'Restart now', 'primary') : ''}
@@ -1379,8 +1381,8 @@ async function editSetting(key) {
       { value: 'all', label: 'All languages', desc: 'Counts every review worldwide (more reviews, can differ from Steam\'s page)', selected: s.reviews_language === 'all' }] });
   } else if (key === 'app_updates') {
     v = await choose({ title: 'PlayVault updates', options: [
-      { value: 'auto', label: 'Download automatically', desc: 'Downloads new versions in the background; they install the next time you open PlayVault', selected: (s.app_updates || 'auto') === 'auto' },
-      { value: 'ask', label: 'Ask first', desc: 'Shows a banner when a new version is out; you choose when to download it', selected: s.app_updates === 'ask' },
+      { value: 'auto', label: 'Download automatically', desc: 'Checks when PlayVault opens and downloads new versions; they install the next time you open PlayVault', selected: (s.app_updates || 'auto') === 'auto' },
+      { value: 'ask', label: 'Ask first', desc: 'Checks when PlayVault opens and shows a banner; you choose when to download', selected: s.app_updates === 'ask' },
       { value: 'off', label: 'Off', desc: 'Never checks on its own (you can still use Check now)', selected: s.app_updates === 'off' }] });
   } else if (key === 'country') {
     v = await choose({ title: 'Steam store region', options: COUNTRIES.map(([c, n]) => ({ value: c, label: n, selected: c === s.country })) });

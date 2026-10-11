@@ -59,7 +59,6 @@ class App:
         self.ratings.enabled = s.get('ratings_enabled', True)
         self.jobs = JobManager(on_change=self.bump, on_done=self.on_job_done)
         self.updater = Updater(on_change=self.bump)
-        self.updater.start()
         threading.Thread(target=self._startup, daemon=True).start()
         threading.Thread(target=self._watchdog, daemon=True).start()
 
@@ -813,9 +812,13 @@ def route(method, p, q, body):
         threading.Timer(0.3, lambda: os._exit(0)).start()
         return {'ok': True}
     if p == ['update', 'check']:
+        # the UI sends startup=true once when PlayVault opens; that's the only automatic check
+        mode = store.get_settings().get('app_updates', 'auto')
+        if body.get('startup') and mode == 'off':
+            return a.updater.snapshot()
         dl = body.get('download')
         if dl is None:
-            dl = store.get_settings().get('app_updates', 'auto') == 'auto'
+            dl = mode == 'auto'
         _bg(a.updater.check, bool(dl))
         return a.updater.snapshot()
     if p == ['update', 'confirm']:

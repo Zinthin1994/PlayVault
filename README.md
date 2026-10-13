@@ -104,3 +104,11 @@ PlayVault itself is MIT licensed (see `LICENSE`).
 - `evault/steam.py`: writes Steam `shortcuts.vdf` entries + grid/hero/logo artwork
 - `electron/main.js`: fullscreen window, Epic / GOG sign-in windows (with built-in keyboard), hides while a game runs
 - `web/`: the controller-driven UI (vanilla JS)
+
+## Development
+Unit tests use only the standard library and run on Windows or Linux:
+```bash
+python -m unittest discover -s tests -t .
+```
+They never touch a real install (`PLAYVAULT_HOME` points at a temp folder). `tools/package.py`
+leaves `tests/` out of the release archive.

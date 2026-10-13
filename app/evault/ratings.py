@@ -64,13 +64,22 @@ def similarity(a, b):
     return ratio
 
 
-def steam_search(term, country='us'):
+class SteamUnreachable(RuntimeError):
+    """Steam didn't answer (offline, rate limited, 5xx). Results must not be cached as 'no match'."""
+
+
+def _search(term, country):
+    """Store search results, or None when Steam couldn't be reached."""
     q = urllib.parse.quote(term)
     status, data = http_json(f'https://store.steampowered.com/api/storesearch/?term={q}&cc={country}&l=en')
-    if not data:
-        return []
+    if status != 200 or data is None:
+        return None
     return [{'id': it['id'], 'name': it.get('name', ''), 'image': it.get('tiny_image', '')}
             for it in data.get('items', []) if it.get('type') == 'app' and it.get('id')]
+
+
+def steam_search(term, country='us'):
+    return _search(term, country) or []
 
 
 def best_match(title, country='us'):
@@ -80,7 +89,10 @@ def best_match(title, country='us'):
             variants.append(v)
     best = (0.0, None)
     for term in variants:
-        for it in steam_search(term, country)[:10]:
+        results = _search(term, country)
+        if results is None:
+            raise SteamUnreachable(f'Steam search for {term!r} failed')
+        for it in results[:10]:
             score = max(similarity(v, it['name']) for v in variants)
             # edition-insensitive match counts slightly less, so an exact title wins ties
             score = max(score, 0.97 * similarity(strip_edition(title), strip_edition(it['name'])))
@@ -210,6 +222,7 @@ class Ratings:
 
     # ------------------------------------------------------------ worker
     def _worker(self):
+        backoff = 0
         while True:
             with self.lock:
                 while not self.queue or not self.enabled:
@@ -222,6 +235,17 @@ class Ratings:
                     self.cache[item['app']] = entry
                     write_json(paths.RATINGS, self.cache)
                 self.on_update()
+                backoff = 0
+            except SteamUnreachable as e:
+                # offline or rate limited: keep the item and wait, 30 s doubling up to 10 min
+                backoff = min(600, backoff * 2 or 30)
+                log.info('Steam unreachable (%s), retrying ratings in %ds', e, backoff)
+                with self.lock:
+                    if item['app'] not in self.queued:
+                        self.queue.appendleft(item)
+                        self.queued.add(item['app'])
+                time.sleep(backoff)
+                continue
             except Exception as e:
                 log.warning('Ratings for %s failed: %r', item['app'], e)
             time.sleep(REQUEST_GAP)
@@ -263,6 +287,9 @@ class Ratings:
         entry['deck'] = fetch_deck(sid)
         time.sleep(REQUEST_GAP)
         entry['details'] = fetch_details(sid, self.country)
+        if not any(entry.get(k) for k in ('reviews', 'protondb', 'deck', 'details')):
+            # every lookup failed: Steam is unreachable rather than the game having no data
+            raise SteamUnreachable(f'No Steam data for {sid}')
         if not entry.get('steam_name') and entry.get('details') is not None:
             entry['steam_name'] = title
         entry['status'] = 'ok'

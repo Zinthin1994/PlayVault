@@ -910,7 +910,7 @@ function updateDetail() {
       <div class="hero">${heroSrc ? `<img src="${esc(heroSrc)}" data-fb="${esc(d.hero_fallback || '')}" onerror="if(this.dataset.fb){this.src=this.dataset.fb;this.dataset.fb=''}else{this.remove()}">` : ''}</div>
       <div class="detail-body">
         <div id="d-title">${d.logo ? `<img class="d-logo" src="${esc(d.logo)}" data-fb="${esc(d.logo_fallback || '')}" alt="${esc(d.title)}"
-          onerror="if(this.dataset.fb){this.src=this.dataset.fb;this.dataset.fb=''}else{this.outerHTML='<h1 class=&quot;d-title&quot;>'+this.alt+'</h1>'}">` : `<h1 class="d-title">${esc(d.title)}</h1>`}</div>
+          onerror="if(this.dataset.fb){this.src=this.dataset.fb;this.dataset.fb=''}else{const h=document.createElement('h1');h.className='d-title';h.textContent=this.alt;this.replaceWith(h)}">` : `<h1 class="d-title">${esc(d.title)}</h1>`}</div>
         <div class="d-sub">${sub}</div>
         <div class="actions" id="d-actions"></div>
         <div class="warnings" id="d-warns"></div>

@@ -54,6 +54,14 @@ function request(method, p, body) {
   });
 }
 
+const isOurs = (url) => typeof url === 'string' && (url === BASE || url.startsWith(`${BASE}/`));
+// IPC from the main UI only (login windows have their own preload and only send 'osk')
+const fromUi = (e) => !!(e.senderFrame && isOurs(e.senderFrame.url));
+const uiHandle = (channel, fn) => ipcMain.handle(channel, (e, ...args) => {
+  if (!fromUi(e)) throw new Error(`${channel}: not allowed from ${e.senderFrame ? e.senderFrame.url : 'unknown'}`);
+  return fn(e, ...args);
+});
+
 function readSettings() {
   try {
     return JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'settings.json'), 'utf8'));
@@ -109,6 +117,10 @@ function createWindow() {
     },
   });
   win.setMenuBarVisibility(false);
+  // The preload API (launch, quit, restart) must only ever be reachable from our own UI:
+  // never navigate this window away from the backend or let it open popups.
+  win.webContents.on('will-navigate', (e, url) => { if (!isOurs(url)) e.preventDefault(); });
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.loadURL(`${BASE}/`);
   win.webContents.on('before-input-event', (e, input) => {
     if (input.type === 'keyDown' && input.key === 'F11') {
@@ -199,25 +211,27 @@ function storeLogin(storeId) {
   });
 }
 
-ipcMain.handle('store-login', (e, storeId) => storeLogin(storeId || 'epic'));
-ipcMain.handle('epic-login', () => storeLogin('epic'));
+uiHandle('store-login', (e, storeId) => storeLogin(storeId || 'epic'));
+uiHandle('epic-login', () => storeLogin('epic'));
 // Games are spawned from this process (not the backend) so they inherit the current
 // Game Mode session environment (display, Steam overlay, gamescope app id).
-ipcMain.handle('launch', (e, appName) => {
+uiHandle('launch', (e, appName) => {
   const script = path.join(APP_DIR, 'bin', 'playvault-launch');
-  if (!/^[\w.\-]+$/.test(appName) || !fs.existsSync(script)) return { ok: false, error: 'Cannot launch this game' };
+  // same rule as APP_NAME in evault/server.py (the launcher writes logs/<appName>.log)
+  const valid = typeof appName === 'string' && /^[A-Za-z0-9][\w.\-]{0,127}$/.test(appName) && !appName.includes('..');
+  if (!valid || !fs.existsSync(script)) return { ok: false, error: 'Cannot launch this game' };
   const child = spawn(script, [appName], { cwd: ROOT, detached: true, stdio: 'ignore', env: process.env });
   child.unref();
   return { ok: true };
 });
 const inGameMode = () => (process.env.XDG_CURRENT_DESKTOP || '').toLowerCase() === 'gamescope'
   || !!process.env.GAMESCOPE_WAYLAND_DISPLAY || process.env.SteamGamepadUI === '1';
-ipcMain.handle('info', () => ({ gameMode: inGameMode() }));
-ipcMain.handle('quit', () => app.quit());
+uiHandle('info', () => ({ gameMode: inGameMode() }));
+uiHandle('quit', () => app.quit());
 // Restart to install a downloaded update (bin/playvault swaps it in on start). In Game Mode
 // Steam has to start PlayVault again from its tile, otherwise it wouldn't be shown, so the
 // app just closes there and returns { reopen: true }.
-ipcMain.handle('restart', () => {
+uiHandle('restart', () => {
   const script = path.join(APP_DIR, 'bin', 'playvault');
   const reopen = inGameMode() || process.platform !== 'linux' || !fs.existsSync(script);
   if (!reopen) {
@@ -226,7 +240,7 @@ ipcMain.handle('restart', () => {
   setTimeout(() => app.quit(), 300);
   return { reopen };
 });
-ipcMain.handle('toggle-fullscreen', () => win && win.setFullScreen(!win.isFullScreen()));
+uiHandle('toggle-fullscreen', () => win && win.setFullScreen(!win.isFullScreen()));
 
 // ------------------------------------------------------------------ hide while playing
 async function watchGame() {

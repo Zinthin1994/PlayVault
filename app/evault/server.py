@@ -3,6 +3,7 @@ import json
 import logging
 import mimetypes
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -20,6 +21,16 @@ IDLE_EXIT_SECONDS = 150
 STEAM_CDN = 'https://shared.akamai.steamstatic.com/store_item_assets/steam/apps'
 ALLOWED_HOSTS = {f'127.0.0.1:{paths.PORT}', f'localhost:{paths.PORT}'}
 ALLOWED_ORIGINS = {f'http://{h}' for h in ALLOWED_HOSTS}
+# Epic app names are alphanumeric ids, GOG keys are gog_<digits>. App names end up in file
+# paths (logs/<app>.log, prefixes/<app>), so anything else - '..', slashes - is refused.
+APP_NAME = re.compile(r'^[A-Za-z0-9][\w.\-]{0,127}$')
+
+
+def app_name(value):
+    name = str(value or '')
+    if not APP_NAME.match(name) or '..' in name:
+        raise ValueError(f'Invalid game id: {name[:40]!r}')
+    return name
 
 
 def epic_img(url, w=None, h=None):
@@ -112,19 +123,23 @@ class App:
             self.library_status.update(refreshing=True, error=None)
         self.bump()
         errors = []
-        if legendary.user():
-            try:
-                legendary.refresh_library(force)
-            except Exception as e:
-                log.warning('Epic library refresh failed: %r', e)
-                errors.append(f'Epic: {e}')
-        if gog.user():
-            try:
-                gog.refresh_library()
-            except Exception as e:
-                log.warning('GOG library refresh failed: %r', e)
-                errors.append(f'GOG: {e}')
-        self.library_status.update(refreshing=False, updated=time.time(), error='; '.join(errors) or None)
+        try:
+            if legendary.user():
+                try:
+                    legendary.refresh_library(force)
+                except Exception as e:
+                    log.warning('Epic library refresh failed: %r', e)
+                    errors.append(f'Epic: {e}')
+            if gog.user():
+                try:
+                    gog.refresh_library()
+                except Exception as e:
+                    log.warning('GOG library refresh failed: %r', e)
+                    errors.append(f'GOG: {e}')
+        finally:
+            # always clear the flag, or the UI would show "refreshing" until the backend restarts
+            with self.lock:
+                self.library_status.update(refreshing=False, updated=time.time(), error='; '.join(errors) or None)
         self.bump()
         self.queue_ratings()
         if gog.user():
@@ -275,9 +290,10 @@ class App:
             raise ValueError('Launching games only works on the Steam Machine (Linux)')
         if not self.installed_any(app):
             raise ValueError('Game is not installed')
-        logf = open(os.path.join(paths.LOGS, 'launch_spawn.log'), 'a')
-        subprocess.Popen([paths.LAUNCH_SCRIPT, app], stdout=logf, stderr=subprocess.STDOUT,
-                         stdin=subprocess.DEVNULL, start_new_session=True, cwd=paths.ROOT)
+        # the child keeps its own copy of the fd; close ours so each launch doesn't leak one
+        with open(os.path.join(paths.LOGS, 'launch_spawn.log'), 'a') as logf:
+            subprocess.Popen([paths.LAUNCH_SCRIPT, app], stdout=logf, stderr=subprocess.STDOUT,
+                             stdin=subprocess.DEVNULL, start_new_session=True, cwd=paths.ROOT)
         write_json(paths.RUNNING, {'app_name': app, 'pid': os.getpid(), 'started': time.time(), 'stage': 'spawning'})
         threading.Timer(20, self._clear_spawn_marker, args=(app,)).start()
         self.bump()
@@ -572,14 +588,16 @@ class Handler(BaseHTTPRequestHandler):
         if not n:
             return {}
         try:
-            return json.loads(self.rfile.read(n) or b'{}')
+            data = json.loads(self.rfile.read(n) or b'{}')
         except ValueError:
             return {}
+        return data if isinstance(data, dict) else {}
 
     def _static(self, path):
         rel = path.lstrip('/') or 'index.html'
-        full = os.path.realpath(os.path.join(paths.WEB, rel))
-        if not full.startswith(os.path.realpath(paths.WEB)) or not os.path.isfile(full):
+        web = os.path.realpath(paths.WEB)
+        full = os.path.realpath(os.path.join(web, rel))
+        if not full.startswith(web + os.sep) or not os.path.isfile(full):
             full = os.path.join(paths.WEB, 'index.html')
         ctype = mimetypes.guess_type(full)[0] or 'application/octet-stream'
         if full.endswith('.js'):
@@ -631,6 +649,10 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, res)
         except ValueError as e:
             self._send(400, {'error': str(e)})
+        except KeyError as e:
+            # almost always a request without a required field (body['app_name'] etc.)
+            log.warning('API %s: missing key %r', self.path, e.args[0] if e.args else None)
+            self._send(400, {'error': f'Missing field: {e.args[0] if e.args else "?"}'})
         except Exception as e:
             log.exception('API error on %s', self.path)
             self._send(500, {'error': str(e)})
@@ -653,6 +675,12 @@ def _steam_hint(app):
 def route(method, p, q, body):
     a = APP
     n = len(p)
+    if n >= 2 and p[0] == 'game':
+        p[1] = app_name(p[1])
+    if isinstance(body, dict) and 'app_name' in body:
+        body['app_name'] = app_name(body['app_name'])
+    if isinstance(body, dict) and isinstance(body.get('apps'), list):
+        body['apps'] = [app_name(x) for x in body['apps']]
     if method == 'GET':
         if p == ['ping']:
             return {'ok': True, 'pid': os.getpid(), 'version': VERSION}

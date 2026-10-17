@@ -10,13 +10,30 @@ AUTO_TOOLS = [
 ]
 
 
+def _windows_steam_candidates():
+    cands = []
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r'Software\Valve\Steam') as k:
+            cands.append(os.path.normpath(winreg.QueryValueEx(k, 'SteamPath')[0]))
+    except OSError:
+        pass
+    for var in ('ProgramFiles(x86)', 'ProgramFiles'):
+        if os.environ.get(var):
+            cands.append(os.path.join(os.environ[var], 'Steam'))
+    return cands
+
+
 def steam_roots():
-    cands = [
-        os.path.join(paths.HOME, '.local', 'share', 'Steam'),
-        os.path.join(paths.HOME, '.steam', 'steam'),
-        os.path.join(paths.HOME, '.steam', 'root'),
-        os.path.join(paths.HOME, '.var', 'app', 'com.valvesoftware.Steam', 'data', 'Steam'),
-    ]
+    if paths.IS_WINDOWS:
+        cands = _windows_steam_candidates()
+    else:
+        cands = [
+            os.path.join(paths.HOME, '.local', 'share', 'Steam'),
+            os.path.join(paths.HOME, '.steam', 'steam'),
+            os.path.join(paths.HOME, '.steam', 'root'),
+            os.path.join(paths.HOME, '.var', 'app', 'com.valvesoftware.Steam', 'data', 'Steam'),
+        ]
     seen, out = set(), []
     for c in cands:
         if os.path.isdir(c):
@@ -64,6 +81,8 @@ def _ver_key(name):
 
 
 def list_tools():
+    if paths.IS_WINDOWS:
+        return []  # games run natively, there is no compatibility layer to pick
     tools = []
     seen = set()
     # Valve Proton builds installed through Steam

@@ -24,7 +24,7 @@ import time
 import urllib.parse
 import zlib
 
-from . import paths
+from . import host, paths
 from .util import read_json, write_json, http_get, http_json, tail, log
 
 PREFIX = 'gog_'
@@ -95,7 +95,7 @@ def run(args, timeout=600):
 def popen(args):
     return subprocess.Popen(_cmd(args), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             text=True, bufsize=1, env=env(), stdin=subprocess.DEVNULL,
-                            start_new_session=(os.name != 'nt'))
+                            **host.spawn_kwargs())
 
 
 def version():
@@ -459,7 +459,7 @@ def play_task(inst):
         args = shlex.split(args.replace('\\', '/'))
     wd = task.get('workingDir')
     wd = _case_insensitive(os.path.join(path, wd.replace('\\', '/'))) if wd else os.path.dirname(exe)
-    return exe, args, wd
+    return os.path.normpath(exe), args, os.path.normpath(wd)
 
 
 def _case_insensitive(p):
@@ -525,16 +525,29 @@ def cloud_locations(inst):
 
 
 def resolve_location(location, inst, wine_root):
-    user = os.path.join(wine_root, 'drive_c', 'users', 'steamuser')
-    repl = {
-        '<?INSTALL?>': inst['install_path'],
-        '<?DOCUMENTS?>': os.path.join(user, 'Documents'),
-        '<?SAVED_GAMES?>': os.path.join(user, 'Saved Games'),
-        '<?APPLICATION_DATA_LOCAL?>': os.path.join(user, 'AppData', 'Local'),
-        '<?APPLICATION_DATA_LOCAL_LOW?>': os.path.join(user, 'AppData', 'LocalLow'),
-        '<?APPLICATION_DATA_ROAMING?>': os.path.join(user, 'AppData', 'Roaming'),
-        '<?USER_HOME?>': user,
-    }
+    if paths.IS_WINDOWS:
+        # games run natively: saves live in the real user folders (wine_root is unused)
+        kf = host.known_folder
+        repl = {
+            '<?INSTALL?>': inst['install_path'],
+            '<?DOCUMENTS?>': kf('documents'),
+            '<?SAVED_GAMES?>': kf('saved games'),
+            '<?APPLICATION_DATA_LOCAL?>': kf('local'),
+            '<?APPLICATION_DATA_LOCAL_LOW?>': kf('local_low'),
+            '<?APPLICATION_DATA_ROAMING?>': kf('roaming'),
+            '<?USER_HOME?>': kf('home'),
+        }
+    else:
+        user = os.path.join(wine_root, 'drive_c', 'users', 'steamuser')
+        repl = {
+            '<?INSTALL?>': inst['install_path'],
+            '<?DOCUMENTS?>': os.path.join(user, 'Documents'),
+            '<?SAVED_GAMES?>': os.path.join(user, 'Saved Games'),
+            '<?APPLICATION_DATA_LOCAL?>': os.path.join(user, 'AppData', 'Local'),
+            '<?APPLICATION_DATA_LOCAL_LOW?>': os.path.join(user, 'AppData', 'LocalLow'),
+            '<?APPLICATION_DATA_ROAMING?>': os.path.join(user, 'AppData', 'Roaming'),
+            '<?USER_HOME?>': user,
+        }
     out = location
     for k, v in repl.items():
         out = out.replace(k, v)

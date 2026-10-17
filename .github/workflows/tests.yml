@@ -2,10 +2,11 @@ name: tests
 on: [push, pull_request]
 jobs:
   unittest:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        python: ['3.9', '3.12']   # 3.9 = the oldest install.sh accepts
+        os: [ubuntu-latest, windows-latest]
+        python: ['3.9', '3.12']   # 3.9 = the oldest the installers accept
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

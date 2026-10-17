@@ -8,6 +8,8 @@ Epic: cloud-save download -> fresh Epic auth via legendary -> umu-run game.exe
 GOG:  cloud-save download (gogdl) -> umu-run <primary playTask> (or the native
       Linux start.sh) -> wait -> playtime -> cloud-save upload. No login needed,
       GOG games are DRM-free.
+Windows: the same steps, but the game exe runs natively (no umu/Proton, no prefix) and
+      cloud saves use the real user folders.
 """
 import json
 import os
@@ -17,7 +19,7 @@ import subprocess
 import sys
 import time
 
-from . import gog, legendary, paths, proton, store, umu
+from . import gog, host, legendary, paths, proton, store, umu
 from .util import read_json, write_json
 
 _child = None
@@ -38,10 +40,7 @@ def _redact(cmd):
 
 def _on_signal(signum, frame):
     if _child and _child.poll() is None:
-        try:
-            os.killpg(_child.pid, signal.SIGTERM)
-        except Exception:
-            _child.terminate()
+        host.terminate(_child.pid)
 
 
 def _set_running(data):
@@ -54,6 +53,13 @@ def _set_running(data):
                 pass
     else:
         write_json(paths.RUNNING, data)
+
+
+def _split(args):
+    """Split a user's launch-arguments string (Windows paths keep their backslashes)."""
+    if not paths.IS_WINDOWS:
+        return shlex.split(args)
+    return [t[1:-1] if len(t) > 1 and t[0] == t[-1] == '"' else t for t in shlex.split(args, posix=False)]
 
 
 def _clean_env(env):
@@ -100,7 +106,9 @@ def _play(app_name, cmd, cwd, env, log):
     cwd = cwd if cwd and os.path.isdir(cwd) else None
     _child = subprocess.Popen(cmd, cwd=cwd, env=env,
                               stdout=log.file, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                              start_new_session=True)
+                              **host.spawn_kwargs())
+    _set_running({'app_name': app_name, 'pid': os.getpid(), 'child': _child.pid, 'started': start,
+                  'stage': 'running'})
     rc = _child.wait()
     duration = time.time() - start
     log(f'Game exited with code {rc} after {int(duration)}s')
@@ -126,13 +134,25 @@ def launch_gog(app_name, extra, log):
         exe, task_args, cwd = gog.play_task(inst)
     except RuntimeError as e:
         return 1, str(e)
-    cmd_tail = list(task_args) + (shlex.split(g['args']) if g['args'] else []) + list(extra)
+    cmd_tail = list(task_args) + (_split(g['args']) if g['args'] else []) + list(extra)
 
-    if inst.get('platform') == 'linux':
+    if inst.get('platform') == 'linux' or paths.IS_WINDOWS:
         env = _user_env(_clean_env(os.environ.copy()), g)
         cmd = [exe] + cmd_tail
-        log(f'Native Linux build: {shlex.join(cmd)}')
+        cloud = g['cloud_saves'] if g['cloud_saves'] is not None else s['cloud_saves']
+        native_saves = paths.IS_WINDOWS and cloud
+        if native_saves:
+            try:
+                gog.sync_saves(inst, None, 'download', log)
+            except Exception as e:
+                log(f'GOG cloud save download failed: {e!r}')
+        log(f'Native {"Windows" if paths.IS_WINDOWS else "Linux"} build: {shlex.join(cmd)}')
         rc, duration = _play(app_name, cmd, cwd, env, log)
+        if native_saves:
+            try:
+                gog.sync_saves(inst, None, 'upload', log)
+            except Exception as e:
+                log(f'GOG cloud save upload failed: {e!r}')
     else:
         runner = umu.umu_run()
         if not runner:
@@ -178,11 +198,13 @@ def launch_epic(app_name, extra, log):
     meta = legendary.metadata(app_name) or {}
     attrs = (meta.get('metadata') or {}).get('customAttributes') or {}
     cloud_supported = 'CloudSaveFolder' in attrs
+    native = paths.IS_WINDOWS  # no Proton prefix: saves are in the real user folders
     prefix = os.path.join(paths.PREFIXES, app_name)
-    os.makedirs(prefix, exist_ok=True)
+    if not native:
+        os.makedirs(prefix, exist_ok=True)
 
     def wine_root():
-        return _wine_root(prefix)
+        return None if native else _wine_root(prefix)
 
     def point_legendary_at_prefix():
         root = wine_root()
@@ -192,7 +214,7 @@ def launch_epic(app_name, extra, log):
     point_legendary_at_prefix()
     cloud = g['cloud_saves'] if g['cloud_saves'] is not None else s['cloud_saves']
     offline = bool(g['offline'])
-    prefix_ready = wine_root() is not None
+    prefix_ready = native or wine_root() is not None
     if cloud and cloud_supported and not offline and prefix_ready:
         log('Syncing cloud saves (download)...')
         # --accept-path: with -y legendary otherwise skips games whose save path isn't stored yet
@@ -219,29 +241,35 @@ def launch_epic(app_name, extra, log):
         return 1, reason
     p = json.loads(out)
 
-    runner = umu.umu_run()
-    if not runner:
+    runner = None if native else umu.umu_run()
+    if not native and not runner:
         return 1, 'umu-launcher is missing - re-run the installer'
 
-    exe = os.path.join(p['game_directory'], p['game_executable'])
-    cmd = [runner, exe]
+    exe = os.path.normpath(os.path.join(p['game_directory'], p['game_executable']))
+    cmd = [exe] if native else [runner, exe]
     cmd += p.get('game_parameters') or []
     cmd += p.get('user_parameters') or []
     cmd += p.get('egl_parameters') or []
     if g['args']:
-        cmd += shlex.split(g['args'])
+        cmd += _split(g['args'])
     cmd += extra
 
-    ratings = read_json(paths.RATINGS, {}) or {}
-    steam_appid = g.get('steam_appid') or (ratings.get(app_name) or {}).get('steam_appid')
-    gameid = g.get('umu_gameid') or umu.game_id(app_name, steam_appid)
+    if native:
+        env = _clean_env(os.environ.copy())
+        env.update(p.get('environment') or {})
+        _user_env(env, g)
+        log('Command: ' + shlex.join(_redact(cmd)))
+    else:
+        ratings = read_json(paths.RATINGS, {}) or {}
+        steam_appid = g.get('steam_appid') or (ratings.get(app_name) or {}).get('steam_appid')
+        gameid = g.get('umu_gameid') or umu.game_id(app_name, steam_appid)
 
-    env = _proton_env(app_name, g, s, gameid, 'egs', prefix)
-    env.update(p.get('environment') or {})
-    _user_env(env, g)
+        env = _proton_env(app_name, g, s, gameid, 'egs', prefix)
+        env.update(p.get('environment') or {})
+        _user_env(env, g)
 
-    log(f'Proton: {env["PROTONPATH"]}   GAMEID: {gameid}   Prefix: {prefix}')
-    log('Command: ' + shlex.join(_redact(cmd)))
+        log(f'Proton: {env["PROTONPATH"]}   GAMEID: {gameid}   Prefix: {prefix}')
+        log('Command: ' + shlex.join(_redact(cmd)))
     if not prefix_ready:
         log('First launch: umu will set up the Proton prefix (and download Proton/runtime if needed).')
 
@@ -249,7 +277,7 @@ def launch_epic(app_name, extra, log):
     rc, duration = _play(app_name, cmd, cwd, env, log)
 
     point_legendary_at_prefix()  # prefix exists now even if this was the first launch
-    if cloud and cloud_supported and not offline and wine_root():
+    if cloud and cloud_supported and not offline and (native or wine_root()):
         log('Syncing cloud saves (upload)...')
         r2, o2, e2 = legendary.run(['sync-saves', app_name, '--skip-download', '--accept-path'], timeout=180)
         log((e2 or o2).strip()[-1500:] or f'sync-saves exit {r2}')

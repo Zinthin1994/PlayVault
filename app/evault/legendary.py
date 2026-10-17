@@ -12,7 +12,7 @@ import subprocess
 import threading
 import time
 
-from . import paths
+from . import host, paths
 from .util import read_json, write_json, tail, log
 
 _meta_cache = {}   # app_name -> (mtime, data)
@@ -56,7 +56,7 @@ def popen(args):
         raise RuntimeError('legendary is not installed')
     return subprocess.Popen([b, '-y'] + list(args), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             text=True, bufsize=1, env=env(), stdin=subprocess.DEVNULL,
-                            start_new_session=(os.name != 'nt'))
+                            **host.spawn_kwargs())
 
 
 def version():

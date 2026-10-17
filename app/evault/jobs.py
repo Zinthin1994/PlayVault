@@ -7,12 +7,11 @@ import itertools
 import os
 import re
 import shutil
-import signal
 import subprocess
 import threading
 import time
 
-from . import gog, legendary, paths, proton, store
+from . import gog, host, legendary, paths, proton, store
 from .util import log
 
 SERIAL = ('install', 'update', 'repair', 'move', 'prepare')
@@ -110,24 +109,12 @@ class JobManager:
     def _kill(proc):
         if not proc or proc.poll() is not None:
             return
-        try:
-            if os.name != 'nt':
-                os.killpg(proc.pid, signal.SIGTERM)
-            else:
-                proc.terminate()
-        except Exception:
-            pass
+        host.terminate(proc.pid)
 
         def hard():
             time.sleep(6)
             if proc.poll() is None:
-                try:
-                    if os.name != 'nt':
-                        os.killpg(proc.pid, signal.SIGKILL)
-                    else:
-                        proc.kill()
-                except Exception:
-                    pass
+                host.terminate(proc.pid, force=True)
         threading.Thread(target=hard, daemon=True).start()
 
     def _worker(self):
@@ -306,7 +293,8 @@ class JobManager:
         if gog.is_gog(job['app_name']):
             inst = self._gog_inst(job)
             path = inst.get('install_path')
-            if path and os.path.isdir(path) and os.path.realpath(path) not in ('/', paths.HOME):
+            real = os.path.realpath(path) if path else ''
+            if path and os.path.isdir(path) and real not in (paths.HOME, os.path.dirname(real)):  # never a home or drive root
                 shutil.rmtree(path, ignore_errors=True)
             gog.unregister(inst['id'])
         else:
@@ -370,6 +358,8 @@ class JobManager:
 
     def _do_prepare(self, job):
         """Download the Steam runtime + Proton build used by umu, by creating a scratch prefix."""
+        if paths.IS_WINDOWS:
+            return  # games run natively, there is no runtime to download
         if not os.path.exists(paths.UMU_RUN):
             raise RuntimeError('umu-launcher is not installed')
         s = store.get_settings()
@@ -381,7 +371,7 @@ class JobManager:
         job['message'] = 'Downloading Steam runtime and Proton (first time can take a while)'
         proc = subprocess.Popen([paths.UMU_RUN, ''], env=env, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, text=True, stdin=subprocess.DEVNULL,
-                                start_new_session=True)
+                                **host.spawn_kwargs())
         job['_proc'] = proc
         lines = []
         for line in proc.stdout:

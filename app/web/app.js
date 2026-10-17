@@ -20,6 +20,8 @@ const S = {
   focusedEl: null, focusMem: {}, cardHtml: [], parts: {},
   drives: null, proton: null, sys: null, lastRunning: null, offline: false, shell: '',
 };
+// the same UI runs on SteamOS and Windows; only Proton / Game Mode specifics differ
+const isWin = () => !!(S.state && S.state.platform === 'windows');
 
 // ================================================================ formatting
 function fmtBytes(n) {
@@ -402,7 +404,7 @@ async function confirmExit() {
   const st = S.state || {};
   const busy = st.jobs_active || 0;
   const bg = !st.settings || st.settings.background_downloads !== false;
-  let msg = 'You can reopen it from your Steam library.';
+  let msg = isWin() ? 'You can reopen it from the Start menu.' : 'You can reopen it from your Steam library.';
   if (busy) msg = bg ? `${busy} download(s) will keep going in the background.` : `${busy} download(s) will stop.`;
   if (await confirmBox({ title: 'Exit PlayVault?', msg, ok: 'Exit' })) doQuit();
 }
@@ -586,8 +588,8 @@ function renderLogin() {
   return `<div class="login"><div class="box">
     <div class="logo-big">PV</div>
     <h1>PlayVault</h1>
-    <p>Your Epic Games and GOG libraries in Game Mode - with Steam ratings, Proton and one-press play.<br>Sign in to a store to get started. You can add the other one later in Settings.</p>
-    ${missing.length ? `<div class="banner error">${missing.map(esc).join('<br>')} - re-run install.sh</div>` : ''}
+    <p>Your Epic Games and GOG libraries ${isWin() ? 'on your PC' : 'in Game Mode'} - with Steam ratings, ${isWin() ? 'playability info' : 'Proton'} and one-press play.<br>Sign in to a store to get started. You can add the other one later in Settings.</p>
+    ${missing.length ? `<div class="banner error">${missing.map(esc).join('<br>')} - re-run ${isWin() ? 'install.ps1' : 'install.sh'}</div>` : ''}
     <div class="btns">
       ${window.vault ? `<button class="btn primary big focusable" data-action="login" data-fid="login" data-autofocus>Sign in with Epic Games</button>
       <button class="btn primary big focusable" data-action="loginGog" data-fid="login-gog">Sign in with GOG</button>` : ''}
@@ -880,14 +882,14 @@ function detailParts(d) {
   if (d.installed) tiles += t('On disk', fmtBytes(d.install_size), esc(d.install_path || ''));
   else if (d.sizes) tiles += t('Download', fmtBytes(d.sizes.download), `${fmtBytes(d.sizes.disk)} installed`);
   if (d.installed) tiles += t('Version', esc(d.version || '—'), d.update_available ? (d.latest_version ? `Update available: ${esc(d.latest_version)}` : 'Update available') : 'Up to date');
-  if (d.installed && d.platform !== 'linux') tiles += t('Proton', esc(d.proton_name || 'Default'), d.settings.offline ? 'Offline mode' : '', `data-action="props" data-app="${esc(d.app_name)}" data-fid="d:tile-proton"`);
+  if (d.installed && d.platform !== 'linux' && !isWin()) tiles += t('Proton', esc(d.proton_name || 'Default'), d.settings.offline ? 'Offline mode' : '', `data-action="props" data-app="${esc(d.app_name)}" data-fid="d:tile-proton"`);
   if (d.last_launch) tiles += t('Last launch', d.last_launch.ok ? '<span class="deck-v">OK</span>' : '<span class="deck-u">Failed</span>',
     d.last_launch.ok ? fmtAgo(d.last_launch.time) : esc(d.last_launch.error || ''), `data-action="showLog" data-app="${esc(d.app_name)}" data-fid="d:tile-log"`);
 
   // warnings + rest
   const warns = [];
   if (d.third_party) warns.push(`<div class="banner warn">This game is managed by <b>${esc(d.third_party)}</b>. Epic only hands off to that launcher, which usually needs extra setup inside the Proton prefix.</div>`);
-  if (d.anticheat_full && ['Denied', 'Broken'].includes(d.anticheat_full.status)) warns.push(`<div class="banner error">Its anti-cheat (${esc((d.anticheat_full.anticheats || []).join(', '))}) is <b>${esc(d.anticheat_full.status.toLowerCase())}</b> on Linux - online play will most likely not work.</div>`);
+  if (!isWin() && d.anticheat_full && ['Denied', 'Broken'].includes(d.anticheat_full.status)) warns.push(`<div class="banner error">Its anti-cheat (${esc((d.anticheat_full.anticheats || []).join(', '))}) is <b>${esc(d.anticheat_full.status.toLowerCase())}</b> on Linux - online play will most likely not work.</div>`);
   if (d.cloud_saves && d.installed) warns.push(`<div class="banner info">${STORE_NAME[d.store]} cloud saves are supported and ${(d.settings.cloud_saves ?? st.settings.cloud_saves) ? 'will sync before and after you play.' : 'are turned off for this game.'}</div>`);
 
   let rest = '';
@@ -935,7 +937,7 @@ async function openInstall(app) {
   let sel = Math.max(0, drives.findIndex((x) => x.games_dir === st.install_dir));
   if (!drives.find((x) => x.games_dir === st.install_dir)) drives.unshift({ label: 'Default location', games_dir: st.install_dir, free: null, kind: 'custom' });
   // GOG games can come as a Windows build (run with Proton) and/or a native Linux build
-  const plats = d.store === 'gog' ? (d.platforms || ['windows']) : ['windows'];
+  const plats = d.store === 'gog' && !isWin() ? (d.platforms || ['windows']) : ['windows'];
   let platform = plats.includes('linux') && (st.gog_prefer_linux || !plats.includes('windows')) ? 'linux' : 'windows';
   let sizes = d.store === 'gog' ? null : d.sizes;
   const loadSizes = () => {
@@ -950,7 +952,7 @@ async function openInstall(app) {
       : '<span class="spinner" style="display:inline-block;vertical-align:middle"></span> Checking size...';
     const warn = [];
     if (d.third_party) warn.push(`<div class="banner warn">Managed by ${esc(d.third_party)} - may need that launcher to run.</div>`);
-    if (d.anticheat_full && ['Denied', 'Broken'].includes(d.anticheat_full.status)) warn.push(`<div class="banner error">Anti-cheat is ${esc(d.anticheat_full.status.toLowerCase())} on Linux - online modes likely won't work.</div>`);
+    if (!isWin() && d.anticheat_full && ['Denied', 'Broken'].includes(d.anticheat_full.status)) warn.push(`<div class="banner error">Anti-cheat is ${esc(d.anticheat_full.status.toLowerCase())} on Linux - online modes likely won't work.</div>`);
     const verRows = plats.length > 1 ? `<div class="k" style="color:var(--muted);font-size:.8rem;margin-top:8px">VERSION</div>` +
       [['windows', 'Windows version', 'Runs with Proton - usually the most up to date (recommended)'], ['linux', 'Native Linux version', 'No Proton needed, but GOG Linux builds are sometimes older']]
         .map(([id, label, desc]) => `<div class="opt focusable ${platform === id ? 'selected' : ''}" data-action="m" data-k="plat" data-p="${id}" data-fid="plat-${id}">
@@ -994,14 +996,15 @@ async function openGameSettings(app) {
     <div class="grow"><div>${title}</div><div class="d">${desc}</div></div>
     ${toggle === undefined ? `<span style="color:var(--muted);max-width:40%;text-align:right;overflow:hidden;text-overflow:ellipsis">${esc(val)}</span>` : `<div class="toggle ${toggle ? 'on' : ''}"></div>`}</div>`;
   const native = d.platform === 'linux';
+  const noProton = native || isWin();  // Windows runs games directly, there is no Proton to configure
   const storeName = STORE_NAME[d.store] || 'the store';
   const body = () => [
-    native ? '' : row('proton', 'Proton version', 'Compatibility tool used to run this game', g.proton ? toolName(g.proton) : `Default (${toolName(st.default_proton) || 'GE-Proton'})`),
+    noProton ? '' : row('proton', 'Proton version', 'Compatibility tool used to run this game', g.proton ? toolName(g.proton) : `Default (${toolName(st.default_proton) || 'GE-Proton'})`),
     row('args', 'Launch arguments', 'Extra command-line arguments passed to the game', g.args || 'None'),
-    row('env', 'Environment variables', native ? 'e.g. SDL_VIDEODRIVER=x11' : 'e.g. DXVK_ASYNC=1 PROTON_USE_WINED3D=1', envStr() || 'None'),
+    row('env', 'Environment variables', native ? 'e.g. SDL_VIDEODRIVER=x11' : isWin() ? 'e.g. SOME_VARIABLE=1' : 'e.g. DXVK_ASYNC=1 PROTON_USE_WINED3D=1', envStr() || 'None'),
     native ? '' : row('cloud', 'Cloud saves', d.cloud_saves ? `Sync saves with ${storeName} before/after playing` : `This game has no ${storeName} cloud saves`, g.cloud_saves === null || g.cloud_saves === undefined ? `Default (${st.cloud_saves ? 'On' : 'Off'})` : g.cloud_saves ? 'On' : 'Off'),
     d.store === 'epic' ? row('offline', 'Offline mode', 'Launch without contacting Epic (only some games support it)', '', !!g.offline) : '',
-    native ? '' : row('plog', 'Proton debug log', 'Writes a detailed Proton log next to the launch log', '', !!g.proton_log),
+    noProton ? '' : row('plog', 'Proton debug log', 'Writes a detailed Proton log next to the launch log', '', !!g.proton_log),
     row('match', 'Steam match', 'Which Steam game ratings/art come from', d.steam_name ? `${d.steam_name} (${d.steam_appid})` : d.steam_appid ? String(d.steam_appid) : 'Not matched'),
     row('log', 'View launch log', 'Output from the last launch', ''),
   ].join('');
@@ -1077,7 +1080,11 @@ async function openMore(app) {
     const dest = await choose({ title: 'Move to', options: drives.map((x) => ({ value: x.games_dir, label: x.label, desc: `${x.games_dir} · ${fmtBytes(x.free)} free` })) });
     if (dest) safe(() => api('move', { app_name: app, base_path: dest }), 'Move queued - see Downloads');
   }
-  if (v === 'uninstall') {
+  if (v === 'uninstall' && isWin()) {
+    if (await confirmBox({ title: `Uninstall ${d.title}?`, msg: 'Game files will be deleted. Cloud saves are kept.', ok: 'Uninstall', danger: true })) {
+      safe(() => api('uninstall', { app_name: app, delete_prefix: false }), 'Uninstalling...');
+    }
+  } else if (v === 'uninstall') {
     const how = await choose({
       title: `Uninstall ${d.title}?`, msg: 'Game files will be deleted. The Proton prefix holds local saves and settings.',
       options: [{ value: 'keep', label: 'Uninstall, keep Proton prefix', desc: 'Recommended - keeps local saves' },
@@ -1113,7 +1120,7 @@ async function launchGame(app) {
   if (r) {
     const g = S.games.find((x) => x.app_name === app);
     const first = g && !g.last_played;
-    toast(first ? 'Launching... the first launch sets up Proton and can take a few minutes' : 'Launching...', 'good');
+    toast(first && !isWin() ? 'Launching... the first launch sets up Proton and can take a few minutes' : 'Launching...', 'good');
   }
 }
 
@@ -1129,7 +1136,8 @@ async function afterSteamChange() {
 async function steamApply() {
   const ok = await confirmBox({
     title: 'Restart Steam now?', ok: 'Restart Steam',
-    msg: 'Steam must restart to pick up the new library tiles. PlayVault will close with it - just reopen it afterwards.',
+    msg: isWin() ? 'Steam must restart to pick up the new library tiles. It closes and reopens by itself.'
+      : 'Steam must restart to pick up the new library tiles. PlayVault will close with it - just reopen it afterwards.',
   });
   if (!ok) return;
   const info = window.vault && window.vault.info ? await window.vault.info() : {};
@@ -1310,18 +1318,18 @@ function settingsHtml() {
     <div class="grow"><div class="t">${esc(g.title)}</div></div><div class="val">${fmtBytes(g.install_size)}</div></div>`).join('');
   return `<div class="page settings">
     <h3>Downloads & installs</h3>
-    ${sel('install_dir', 'Default install location', 'Where new games are installed (internal storage, microSD or USB)', s.install_dir)}
+    ${sel('install_dir', 'Default install location', isWin() ? 'Where new games are installed (any drive)' : 'Where new games are installed (internal storage, microSD or USB)', s.install_dir)}
     ${tog('install_dlc', 'Install owned DLC with games', 'Downloads all DLC you own together with the base game')}
-    ${tog('background_downloads', 'Keep downloading after closing PlayVault', 'Downloads continue in the background when you exit to Game Mode')}
-    ${tog('gog_prefer_linux', 'Prefer native Linux versions of GOG games', 'When a GOG game has both, pick the Linux build instead of Windows + Proton by default')}
+    ${tog('background_downloads', 'Keep downloading after closing PlayVault', isWin() ? 'Downloads continue in the background when you close PlayVault' : 'Downloads continue in the background when you exit to Game Mode')}
+    ${isWin() ? '' : tog('gog_prefer_linux', 'Prefer native Linux versions of GOG games', 'When a GOG game has both, pick the Linux build instead of Windows + Proton by default')}
     ${sel('max_workers', 'Download workers', 'Parallel download connections', s.max_workers ? String(s.max_workers) : 'Automatic')}
     ${act('updateAll', 'Update all games', 'Queue updates for every installed game that has one', 'Update all')}
     <h3>Playing</h3>
-    ${sel('default_proton', 'Default Proton version', 'Used for games without their own Proton setting', protonName || 'GE-Proton')}
+    ${isWin() ? '' : sel('default_proton', 'Default Proton version', 'Used for games without their own Proton setting', protonName || 'GE-Proton')}
     ${tog('cloud_saves', 'Cloud saves', 'Sync Epic and GOG cloud saves before and after playing')}
     ${tog('hide_while_playing', 'Hide PlayVault while a game runs', 'Keeps the game in front; PlayVault comes back when the game exits')}
     ${tog('skip_update_check', 'Allow launching out-of-date games', 'Play even if an update is pending (online games may refuse)')}
-    ${act('prepare', 'Prepare Proton now', 'Downloads the Steam runtime and Proton ahead of your first launch', 'Prepare')}
+    ${isWin() ? '' : act('prepare', 'Prepare Proton now', 'Downloads the Steam runtime and Proton ahead of your first launch', 'Prepare')}
     <h3>Steam library</h3>
     ${tog('auto_add_steam', 'Add games to Steam after install', 'Creates a Steam library tile with artwork for each installed game')}
     ${tog('remove_steam_on_uninstall', 'Remove from Steam when uninstalled', 'Deletes the Steam tile when you uninstall')}
@@ -1336,7 +1344,7 @@ function settingsHtml() {
     ${act('refreshLib', 'Sync libraries', 'Re-download your owned games lists from Epic and GOG', 'Sync')}
     ${tog('show_hidden', 'Show "Hidden" filter', 'Lets you browse and unhide hidden games')}
     ${sel('card_size', 'Cover size', 'Size of game covers in the library', { small: 'Small', medium: 'Medium', large: 'Large' }[s.card_size] || 'Medium')}
-    ${tog('delete_prefix_on_uninstall', 'Delete Proton prefix on uninstall (default)', 'Off keeps local saves when you uninstall')}
+    ${isWin() ? '' : tog('delete_prefix_on_uninstall', 'Delete Proton prefix on uninstall (default)', 'Off keeps local saves when you uninstall')}
     <h3>Storage</h3>
     ${drives || '<div class="setting"><div class="grow d">Loading...</div></div>'}
     ${installed.length ? `<h3>Installed games (${installed.length}) · ${fmtBytes(installed.reduce((a, g) => a + g.install_size, 0))}</h3>${instHtml}` : ''}
@@ -1352,8 +1360,8 @@ function settingsHtml() {
     ${S.state.update && S.state.update.notes && ['available', 'ready', 'needs_installer'].includes(S.state.update.status) ? act('updateNotes', "What's new", `Release notes for PlayVault ${esc(S.state.update.latest)}`, 'Show') : ''}
     <h3>About</h3>
     <div class="setting focusable" data-action="noop" data-fid="s:about"><div class="grow"><div class="t">PlayVault ${esc(S.state.app_version)}</div>
-      <div class="d">legendary ${esc(sys.legendary_version || '?')} · gogdl ${esc(sys.gogdl_version || 'missing')} · umu ${sys.umu_path ? 'installed' : 'missing'} · Python ${esc(sys.python || '?')} ·
-      Steam user ${esc(sys.steam_user || 'not found')} · ${sys.game_mode ? 'Game Mode' : 'Desktop Mode'}<br>Data: ${esc(sys.data_dir || '')}</div></div></div>
+      <div class="d">legendary ${esc(sys.legendary_version || '?')} · gogdl ${esc(sys.gogdl_version || 'missing')} · ${isWin() ? 'native games' : `umu ${sys.umu_path ? 'installed' : 'missing'}`} · Python ${esc(sys.python || '?')} ·
+      Steam user ${esc(sys.steam_user || 'not found')} · ${isWin() ? 'Windows' : sys.game_mode ? 'Game Mode' : 'Desktop Mode'}<br>Data: ${esc(sys.data_dir || '')}</div></div></div>
     ${act('quit', 'Exit PlayVault', 'Downloads keep going in the background if enabled above', 'Exit')}
   </div>`;
 }

@@ -12,7 +12,7 @@ import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import VERSION, gog, legendary, paths, proton, ratings as ratings_mod, steam, store, system, umu
+from . import VERSION, gog, host, legendary, paths, proton, ratings as ratings_mod, steam, store, system, umu
 from .jobs import JobManager
 from .updater import Updater
 from .util import read_json, write_json, pid_alive, log
@@ -286,14 +286,12 @@ class App:
     def launch(self, app):
         if self.running():
             raise ValueError('A game is already running')
-        if os.name == 'nt':
-            raise ValueError('Launching games only works on the Steam Machine (Linux)')
         if not self.installed_any(app):
             raise ValueError('Game is not installed')
         # the child keeps its own copy of the fd; close ours so each launch doesn't leak one
         with open(os.path.join(paths.LOGS, 'launch_spawn.log'), 'a') as logf:
             subprocess.Popen([paths.LAUNCH_SCRIPT, app], stdout=logf, stderr=subprocess.STDOUT,
-                             stdin=subprocess.DEVNULL, start_new_session=True, cwd=paths.ROOT)
+                             stdin=subprocess.DEVNULL, cwd=paths.ROOT, **host.spawn_kwargs())
         write_json(paths.RUNNING, {'app_name': app, 'pid': os.getpid(), 'started': time.time(), 'stage': 'spawning'})
         threading.Timer(20, self._clear_spawn_marker, args=(app,)).start()
         self.bump()
@@ -310,6 +308,10 @@ class App:
     def stop(self):
         r = self.running()
         if r and r.get('pid') != os.getpid():
+            if paths.IS_WINDOWS:
+                # end the game's process tree; the launcher then finishes up (playtime, cloud saves)
+                host.terminate(r.get('child') or r['pid'], force=True)
+                return
             try:
                 os.kill(int(r['pid']), signal.SIGTERM)
             except OSError:
@@ -529,7 +531,8 @@ class App:
             'accounts': {'epic': epic_user, 'gog': gog_user},
             'legendary': legendary.available(),
             'gogdl': gog.available(),
-            'umu': bool(umu.umu_run()),
+            'umu': paths.IS_WINDOWS or bool(umu.umu_run()),  # Windows has no Proton runner to miss
+            'platform': 'windows' if paths.IS_WINDOWS else 'linux',
             'library': self.library_status,
             'ratings_pending': self.ratings.pending(),
             'running': self.running(),
@@ -554,6 +557,7 @@ class App:
             'app_version': VERSION,
             'legendary_version': self.legendary_version,
             'gogdl_version': self.gogdl_version,
+            'platform': 'windows' if paths.IS_WINDOWS else 'linux',
             'umu_path': umu.umu_run(),
             'steam_root': proton.steam_root(),
             'steam_user': uid,
@@ -693,7 +697,8 @@ def route(method, p, q, body):
         if n == 2 and p[0] == 'game':
             return a.detail(p[1])
         if n == 3 and p[0] == 'game' and p[2] == 'sizes':
-            return a.sizes(p[1], refresh=q.get('refresh') == '1', platform=q.get('platform'))
+            return a.sizes(p[1], refresh=q.get('refresh') == '1',
+                           platform='windows' if paths.IS_WINDOWS else q.get('platform'))
         if n == 3 and p[0] == 'game' and p[2] == 'log':
             path = os.path.join(paths.LOGS, f'{p[1]}.log')
             try:
@@ -747,7 +752,7 @@ def route(method, p, q, body):
         if body.get('base_path'):
             os.makedirs(body['base_path'], exist_ok=True)
         return a.jobs.add('install', app, a.title(app), base_path=body.get('base_path'),
-                          platform=body.get('platform'))
+                          platform='windows' if paths.IS_WINDOWS else body.get('platform'))
     if p == ['update']:
         return a.jobs.add('update', body['app_name'], a.title(body['app_name']))
     if p == ['update-all']:

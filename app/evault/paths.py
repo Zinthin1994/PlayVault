@@ -1,16 +1,18 @@
 """Filesystem layout.
 
-Installed layout (default ROOT = ~/.local/share/playvault):
+Installed layout (default ROOT = ~/.local/share/playvault on SteamOS, %LOCALAPPDATA%/PlayVault on Windows):
     ROOT/app        this code (evault/, web/, electron/, bin/, art/)
     ROOT/venv       python venv with legendary
     ROOT/gogdl      gogdl (GOG client)
-    ROOT/umu        umu-launcher zipapp (umu-run)
+    ROOT/umu        umu-launcher zipapp (umu-run), SteamOS only: Windows runs games natively
     ROOT/electron   Electron runtime
     ROOT/data       everything the app writes
     ROOT/update     a downloaded PlayVault update waiting to be installed (see updater.py)
     ROOT/app.prev   the previous version, kept for rollback after an update
 """
 import os
+
+from .host import IS_WINDOWS  # noqa: F401  (re-exported: paths.IS_WINDOWS)
 
 HOME = os.path.expanduser('~')
 APP = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -52,12 +54,14 @@ UPDATE_FAILED = os.path.join(UPDATE_DIR, 'failed.json')  # rolled back: don't of
 UPDATE_STATE = os.path.join(DATA, 'update.json')
 ELECTRON_VERSION_FILE = os.path.join(ROOT, 'electron', '.version')
 
-LEGENDARY_BIN =os.path.join(ROOT, 'venv', 'bin', 'legendary')
-VENV_PYTHON = os.path.join(ROOT, 'venv', 'bin', 'python')
-GOGDL_BIN = os.path.join(ROOT, 'gogdl', 'gogdl')
+# venv layout and script names differ per OS; everything else is shared
+_VENV_BIN, _EXE, _SCRIPT = ('Scripts', '.exe', '.cmd') if IS_WINDOWS else ('bin', '', '')
+LEGENDARY_BIN = os.path.join(ROOT, 'venv', _VENV_BIN, 'legendary' + _EXE)
+VENV_PYTHON = os.path.join(ROOT, 'venv', _VENV_BIN, 'python' + _EXE)
+GOGDL_BIN = os.path.join(ROOT, 'gogdl', 'gogdl' + _EXE)
 UMU_RUN = os.path.join(ROOT, 'umu', 'umu-run')
-LAUNCH_SCRIPT = os.path.join(APP, 'bin', 'playvault-launch')
-APP_SCRIPT = os.path.join(APP, 'bin', 'playvault')
+LAUNCH_SCRIPT = os.path.join(APP, 'bin', 'playvault-launch' + _SCRIPT)
+APP_SCRIPT = os.path.join(APP, 'bin', 'playvault' + _SCRIPT)
 WEB = os.path.join(APP, 'web')
 APP_ART = os.path.join(APP, 'art')
 
@@ -71,7 +75,9 @@ PORT = int(os.environ.get('PLAYVAULT_PORT') or os.environ.get('EPICVAULT_PORT') 
 def store_dir(root, store):
     """Install folder for one store under a games root (tolerates roots that already end in it)."""
     sub = STORE_DIRS[store]
-    root = root.rstrip('/') or '/'
+    root = root.rstrip('/\\' if IS_WINDOWS else '/')
+    if not root or root.endswith(':'):  # filesystem root: '/' or a drive such as 'C:\'
+        root += os.sep
     if os.path.basename(root) == sub:
         return root
     return os.path.join(root, sub)

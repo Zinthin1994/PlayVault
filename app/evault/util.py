@@ -5,9 +5,11 @@ import threading
 import urllib.error
 import urllib.request
 
+from .host import pid_alive  # noqa: F401  (re-exported; os.kill(pid, 0) would kill the process on Windows)
+
 log = logging.getLogger('playvault')
 
-USER_AGENT = 'PlayVault/1.2 (personal SteamOS launcher)'
+USER_AGENT = 'PlayVault/1.2 (personal game launcher)'
 
 
 def read_json(path, default=None):
@@ -62,16 +64,6 @@ def download(url, dest, timeout=30):
         os.replace(tmp, dest)
         return True
     return False
-
-
-def pid_alive(pid):
-    if not pid:
-        return False
-    try:
-        os.kill(int(pid), 0)
-        return True
-    except (OSError, ValueError):
-        return False
 
 
 def tail(text, n=600):

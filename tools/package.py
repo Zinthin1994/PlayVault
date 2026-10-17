@@ -9,8 +9,8 @@ import tarfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VERSION = re.search(r"VERSION = '([^']+)'", open(os.path.join(ROOT, 'app', 'evault', '__init__.py')).read()).group(1)
 OUT = os.path.join(ROOT, 'dist', f'PlayVault-{VERSION}.tar.gz')
-TEXT = ('.py', '.js', '.json', '.html', '.css', '.sh', '.md', '')  # '' = extensionless (bin/, LICENSE)
-INCLUDE = ['install.sh', 'uninstall.sh', 'README.md', 'LICENSE', 'app']
+TEXT = ('.py', '.js', '.json', '.html', '.css', '.sh', '.md', '')  # '' = extensionless (bin/, LICENSE); .cmd/.ps1 keep their CRLF
+INCLUDE = ['install.sh', 'uninstall.sh', 'install.ps1', 'install.cmd', 'uninstall.ps1', 'README.md', 'LICENSE', 'app']
 
 
 def add(tar, path, arc):

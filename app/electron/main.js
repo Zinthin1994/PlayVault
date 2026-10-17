@@ -1,5 +1,6 @@
-// PlayVault shell: starts (or reuses) the Python backend, shows the UI fullscreen,
-// handles the Epic / GOG sign-in windows and hides itself while a game is running.
+// PlayVault shell: starts (or reuses) the Python backend, shows the UI fullscreen
+// (a maximized window on Windows, F11 toggles), handles the Epic / GOG sign-in windows
+// and hides itself while a game is running.
 const { app, BrowserWindow, ipcMain, session } = require('electron');
 const { spawn, spawnSync } = require('child_process');
 const fs = require('fs');
@@ -29,8 +30,13 @@ const STORES = {
   },
 };
 
+const WIN = process.platform === 'win32';
+// the venv keeps its interpreter in bin/ on SteamOS and Scripts/ on Windows
+const VENV_PY = WIN ? path.join(ROOT, 'venv', 'Scripts', 'python.exe') : path.join(ROOT, 'venv', 'bin', 'python');
+
 let win = null;
 let hiddenForGame = false;
+let fullscreenBeforeHide = true;
 let runningSince = 0;
 
 app.commandLine.appendSwitch('disable-gpu-sandbox');
@@ -70,8 +76,7 @@ function readSettings() {
 
 async function ensureBackend() {
   if (await request('GET', '/api/ping')) return true;
-  const py = fs.existsSync(path.join(ROOT, 'venv', 'bin', 'python'))
-    ? path.join(ROOT, 'venv', 'bin', 'python') : (process.platform === 'win32' ? 'python' : 'python3');
+  const py = fs.existsSync(VENV_PY) ? VENV_PY : (WIN ? 'python' : 'python3');
   const background = readSettings().background_downloads !== false;
   fs.mkdirSync(path.join(ROOT, 'data', 'logs'), { recursive: true });
   let started = false;
@@ -89,6 +94,7 @@ async function ensureBackend() {
       cwd: APP_DIR,
       env: { ...process.env, PYTHONPATH: APP_DIR, PLAYVAULT_HOME: ROOT, PYTHONUNBUFFERED: '1' },
       detached: background,
+      windowsHide: true,
       stdio: ['ignore', out, out],
     });
     if (background) child.unref();
@@ -102,7 +108,7 @@ async function ensureBackend() {
 
 function createWindow() {
   win = new BrowserWindow({
-    fullscreen: true,
+    fullscreen: !WIN,
     width: 1280,
     height: 800,
     backgroundColor: '#0a0d13',
@@ -117,6 +123,7 @@ function createWindow() {
     },
   });
   win.setMenuBarVisibility(false);
+  if (WIN) win.maximize();
   // The preload API (launch, quit, restart) must only ever be reachable from our own UI:
   // never navigate this window away from the backend or let it open popups.
   win.webContents.on('will-navigate', (e, url) => { if (!isOurs(url)) e.preventDefault(); });
@@ -173,7 +180,7 @@ function storeLogin(storeId) {
     ses.setUserAgent(plainUserAgent(ses.getUserAgent()));
     const prefs = loginPrefs(cfg.partition);
     const lw = new BrowserWindow({
-      parent: win, modal: true, fullscreen: true, backgroundColor: '#121212',
+      parent: win, modal: true, fullscreen: !WIN, width: 1100, height: 760, backgroundColor: '#121212',
       autoHideMenuBar: true, title: cfg.title, webPreferences: prefs,
     });
     const finish = (val) => { if (!done) { done = true; resolve(val); } if (!lw.isDestroyed()) lw.close(); };
@@ -199,7 +206,7 @@ function storeLogin(storeId) {
     lw.webContents.setWindowOpenHandler(() => ({
       action: 'allow',
       overrideBrowserWindowOptions: {
-        parent: lw, modal: true, fullscreen: true, backgroundColor: '#121212',
+        parent: lw, modal: true, fullscreen: !WIN, width: 1100, height: 760, backgroundColor: '#121212',
         autoHideMenuBar: true, webPreferences: prefs,
       },
     }));
@@ -216,11 +223,18 @@ uiHandle('epic-login', () => storeLogin('epic'));
 // Games are spawned from this process (not the backend) so they inherit the current
 // Game Mode session environment (display, Steam overlay, gamescope app id).
 uiHandle('launch', (e, appName) => {
-  const script = path.join(APP_DIR, 'bin', 'playvault-launch');
+  const script = path.join(APP_DIR, 'bin', WIN ? 'playvault-launch.cmd' : 'playvault-launch');
   // same rule as APP_NAME in evault/server.py (the launcher writes logs/<appName>.log)
   const valid = typeof appName === 'string' && /^[A-Za-z0-9][\w.\-]{0,127}$/.test(appName) && !appName.includes('..');
   if (!valid || !fs.existsSync(script)) return { ok: false, error: 'Cannot launch this game' };
-  const child = spawn(script, [appName], { cwd: ROOT, detached: true, stdio: 'ignore', env: process.env });
+  // node won't spawn a .cmd without a shell, so on Windows run the launcher module directly
+  // (what playvault-launch.cmd does)
+  const child = WIN
+    ? spawn(fs.existsSync(VENV_PY) ? VENV_PY : 'python', ['-m', 'evault.launcher', appName], {
+      cwd: ROOT, detached: true, stdio: 'ignore', windowsHide: true,
+      env: { ...process.env, PYTHONPATH: APP_DIR, PLAYVAULT_HOME: ROOT },
+    })
+    : spawn(script, [appName], { cwd: ROOT, detached: true, stdio: 'ignore', env: process.env });
   child.unref();
   return { ok: true };
 });
@@ -232,10 +246,15 @@ uiHandle('quit', () => app.quit());
 // Steam has to start PlayVault again from its tile, otherwise it wouldn't be shown, so the
 // app just closes there and returns { reopen: true }.
 uiHandle('restart', () => {
-  const script = path.join(APP_DIR, 'bin', 'playvault');
-  const reopen = inGameMode() || process.platform !== 'linux' || !fs.existsSync(script);
+  const script = path.join(APP_DIR, 'bin', WIN ? 'playvault.cmd' : 'playvault');
+  const reopen = inGameMode() || !['linux', 'win32'].includes(process.platform) || !fs.existsSync(script);
   if (!reopen) {
-    spawn('bash', ['-c', 'sleep 2; exec "$0"', script], { cwd: ROOT, detached: true, stdio: 'ignore' }).unref();
+    if (WIN) {
+      spawn('cmd.exe', ['/c', 'ping -n 3 127.0.0.1 >nul & call "' + script + '"'],
+        { cwd: ROOT, detached: true, stdio: 'ignore', windowsHide: true }).unref();
+    } else {
+      spawn('bash', ['-c', 'sleep 2; exec "$0"', script], { cwd: ROOT, detached: true, stdio: 'ignore' }).unref();
+    }
   }
   setTimeout(() => app.quit(), 300);
   return { reopen };
@@ -252,6 +271,7 @@ async function watchGame() {
     if (!runningSince) runningSince = Date.now();
     if (hide && !hiddenForGame && Date.now() - runningSince > 6000) {
       hiddenForGame = true;
+      fullscreenBeforeHide = win.isFullScreen();
       win.hide();
     }
   } else {
@@ -259,7 +279,7 @@ async function watchGame() {
     if (hiddenForGame) {
       hiddenForGame = false;
       win.show();
-      win.setFullScreen(true);
+      win.setFullScreen(WIN ? fullscreenBeforeHide : true);
       win.focus();
     }
   }
@@ -272,8 +292,8 @@ app.whenReady().then(async () => {
   if (!ok) {
     win.loadURL('data:text/html,' + encodeURIComponent(
       '<body style="background:#0a0d13;color:#fff;font:20px sans-serif;padding:60px">' +
-      '<h1>PlayVault could not start its backend</h1><p>Check ~/.local/share/playvault/data/logs/backend.stdout.log ' +
-      'and re-run install.sh.</p></body>'));
+      '<h1>PlayVault could not start its backend</h1><p>Check ' + path.join(ROOT, 'data', 'logs', 'backend.stdout.log').replace(/&/g, '&amp;').replace(/</g, '&lt;') + ' ' +
+      'and re-run the installer (' + (WIN ? 'install.ps1' : 'install.sh') + ').</p></body>'));
   }
   setInterval(watchGame, 2000);
 });

@@ -1,9 +1,10 @@
 # PlayVault
 
-A controller-first Epic Games Store + GOG library for SteamOS Game Mode (Steam Machine / Steam Deck).
+A controller-first Epic Games Store + GOG library for SteamOS Game Mode (Steam Machine / Steam Deck),
+and the same app on Windows 10/11.
 Browse your Epic and GOG games in one place, see Steam ratings, install/uninstall, run them through
 Proton (or natively for GOG Linux builds) and play, all from a fullscreen app that lives in your
-Steam library. (Formerly EpicVault.)
+Steam library. On Windows the games simply run natively. (Formerly EpicVault.)
 
 ## Quick install (Steam Deck / Steam Machine)
 
@@ -34,6 +35,25 @@ Upgrading from EpicVault: just run the new installer - it moves everything to
 `~/.local/share/playvault` and renames your existing Steam tiles (artwork, controller layouts and
 playtime are kept).
 `bash uninstall.sh` removes the app (games stay; `--all` also deletes data/prefixes).
+
+## Windows (10/11)
+
+The Windows build is the same app (same UI, same code, same data layout and the same release file);
+only the way games are started differs: they run natively, so there is no Proton, umu or prefix,
+and cloud saves use your real Documents / AppData folders. You need
+[Python 3.9+](https://www.python.org/downloads/) (tick *Add python.exe to PATH*). Open **PowerShell** and paste:
+```powershell
+cd $env:TEMP; curl.exe -L -o PlayVault.tar.gz https://github.com/Zinthin1994/PlayVault/releases/latest/download/PlayVault.tar.gz; tar -xzf PlayVault.tar.gz; powershell -ExecutionPolicy Bypass -File PlayVault\install.ps1
+```
+(or extract the archive and double-click `install.cmd`). It installs into `%LOCALAPPDATA%\PlayVault`:
+legendary (Epic client), gogdl (GOG client) and Electron (UI runtime), adds **PlayVault** to the
+Start menu and, if Steam is installed, to your Steam library (`-NoSteam` skips that).
+Run it again to update (PlayVault also updates itself, see below).
+`powershell -ExecutionPolicy Bypass -File uninstall.ps1` removes the app (games stay; `-All` also deletes data).
+
+The window opens maximized (F11 toggles fullscreen, Ctrl+Q quits). A game started from PlayVault or a Steam tile is
+tracked by its launcher process; games whose exe is only a stub that starts another program may not
+get playtime or a cloud-save upload.
 
 ### Updates
 PlayVault updates itself from this repo's [releases](https://github.com/Zinthin1994/PlayVault/releases).
@@ -68,6 +88,9 @@ pick the **Gamepad** template. Keyboard and mouse also work.
 | `~/.local/share/playvault/data/logs` | `backend.log`, `<game>.log` (launch logs), `steam_apply.log` |
 | `~/Games/Epic`, `~/Games/GOG` | default install folders (changeable, microSD supported) |
 
+On Windows the app and data live in `%LOCALAPPDATA%\PlayVault` (same `app`, `data`, `data\logs` layout, no `prefixes`)
+and games default to `C:\Users\<you>\Games\Epic` and `\GOG` (any drive works).
+
 ## GOG notes
 - GOG games are DRM-free: once installed they launch without signing in, even after you sign out.
 - Games that ship both builds can be installed as the **Windows version** (Proton, usually the most
@@ -100,8 +123,10 @@ PlayVault itself is MIT licensed (see `LICENSE`).
 - `evault/gog.py`: wraps [gogdl](https://github.com/Heroic-Games-Launcher/heroic-gogdl) + GOG's web APIs (library, gamesdb art, builds, cloud saves)
 - `evault/jobs.py`: download queue with progress parsed from legendary's / gogdl's output
 - `evault/ratings.py`: Steam match + reviews, ProtonDB, Deck status, AreWeAntiCheatYet
-- `evault/launcher.py`: cloud-save sync, fresh Epic auth, `umu-run game.exe` with the chosen Proton, playtime
+- `evault/launcher.py`: cloud-save sync, fresh Epic auth, `umu-run game.exe` with the chosen Proton (the exe itself on Windows), playtime
+- `evault/host.py`: the few OS differences (starting/stopping process trees, pid checks, Windows folders); everything else is shared
 - `evault/steam.py`: writes Steam `shortcuts.vdf` entries + grid/hero/logo artwork
+- `bin/playvault`, `bin/playvault.ps1`: start the UI and install/roll back updates (bash on SteamOS, PowerShell on Windows)
 - `electron/main.js`: fullscreen window, Epic / GOG sign-in windows (with built-in keyboard), hides while a game runs
 - `web/`: the controller-driven UI (vanilla JS)
 

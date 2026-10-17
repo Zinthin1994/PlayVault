@@ -16,7 +16,7 @@ import threading
 import time
 import zlib
 
-from . import paths, vdf, proton
+from . import host, paths, vdf, proton
 from .util import read_json, write_json, download, log, pid_alive
 
 TAG = 'PlayVault'
@@ -63,9 +63,23 @@ def current_user():
     return u[0] if u else (None, None)
 
 
+def steam_exe():
+    """The command that starts / shuts down Steam."""
+    if paths.IS_WINDOWS:
+        root = proton.steam_root()
+        exe = os.path.join(root, 'steam.exe') if root else ''
+        return exe if os.path.isfile(exe) else 'steam.exe'
+    return 'steam'
+
+
 def steam_running():
-    if os.name == 'nt':
-        return False
+    if paths.IS_WINDOWS:
+        try:
+            out = subprocess.run(['tasklist', '/FI', 'IMAGENAME eq steam.exe', '/NH'], capture_output=True,
+                                 text=True, stdin=subprocess.DEVNULL, **host.hidden_kwargs()).stdout
+            return 'steam.exe' in out.lower()
+        except OSError:
+            return False
     try:
         out = subprocess.run(['pgrep', '-x', 'steam'], capture_output=True, text=True).stdout
         return bool(out.strip())
@@ -436,7 +450,7 @@ def apply_with_restart(game_mode):
     logf = open(os.path.join(paths.LOGS, 'steam_apply.log'), 'a')
     proc = subprocess.Popen([py, '-m', 'evault.steam', 'apply-restart'], env=env, cwd=paths.APP,
                             stdout=logf, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                            start_new_session=True)
+                            **host.spawn_kwargs())
     write_json(_RESTART_LOCK, {'pid': proc.pid, 'started': time.time()})
     return {'restarting': True}
 
@@ -457,7 +471,8 @@ def _apply_restart():
     game_mode = os.environ.get('PLAYVAULT_GAMEMODE') == '1'
     print(time.ctime(), 'helper: shutting down Steam (game mode=%s)' % game_mode, flush=True)
     time.sleep(1.5)
-    subprocess.Popen(['steam', '-shutdown'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.Popen([steam_exe(), '-shutdown'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     **host.hidden_kwargs())
     for _ in range(120):
         if not steam_running():
             break
@@ -470,7 +485,9 @@ def _apply_restart():
         print('applied:', apply_pending_now(), flush=True)
     except Exception as e:
         print('apply failed:', repr(e), flush=True)
-    if game_mode:
+    if paths.IS_WINDOWS:
+        subprocess.Popen([steam_exe()], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **host.spawn_kwargs())
+    elif game_mode:
         # gamescope-session normally restarts Steam by itself; if it hasn't, ask for Game Mode again.
         for _ in range(30):
             if steam_running():

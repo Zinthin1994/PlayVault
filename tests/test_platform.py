@@ -165,7 +165,7 @@ class InstallScripts(unittest.TestCase):
     def test_windows_scripts_are_ascii(self):
         # Windows PowerShell 5.1 reads BOM-less files as ANSI
         for name in ('install.ps1', 'uninstall.ps1', 'install.cmd', 'app/bin/playvault.ps1',
-                     'app/bin/playvault.cmd', 'app/bin/playvault-launch.cmd'):
+                     'app/bin/playvault.cmd', 'app/bin/playvault.vbs', 'app/bin/playvault-launch.cmd'):
             with open(os.path.join(REPO, name), 'rb') as f:
                 self.assertTrue(all(b < 128 for b in f.read()), name)
 

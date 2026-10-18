@@ -33,6 +33,8 @@ const STORES = {
 const WIN = process.platform === 'win32';
 // the venv keeps its interpreter in bin/ on SteamOS and Scripts/ on Windows
 const VENV_PY = WIN ? path.join(ROOT, 'venv', 'Scripts', 'python.exe') : path.join(ROOT, 'venv', 'bin', 'python');
+// Detached children get no console from Node, so a console python would open its own window; pythonw never does.
+const VENV_PYW = WIN ? path.join(ROOT, 'venv', 'Scripts', 'pythonw.exe') : VENV_PY;
 
 let win = null;
 let hiddenForGame = false;
@@ -76,7 +78,7 @@ function readSettings() {
 
 async function ensureBackend() {
   if (await request('GET', '/api/ping')) return true;
-  const py = fs.existsSync(VENV_PY) ? VENV_PY : (WIN ? 'python' : 'python3');
+  const py = fs.existsSync(VENV_PYW) ? VENV_PYW : (WIN ? 'pythonw' : 'python3');
   const background = readSettings().background_downloads !== false;
   fs.mkdirSync(path.join(ROOT, 'data', 'logs'), { recursive: true });
   let started = false;
@@ -230,7 +232,7 @@ uiHandle('launch', (e, appName) => {
   // node won't spawn a .cmd without a shell, so on Windows run the launcher module directly
   // (what playvault-launch.cmd does)
   const child = WIN
-    ? spawn(fs.existsSync(VENV_PY) ? VENV_PY : 'python', ['-m', 'evault.launcher', appName], {
+    ? spawn(fs.existsSync(VENV_PYW) ? VENV_PYW : 'pythonw', ['-m', 'evault.launcher', appName], {
       cwd: ROOT, detached: true, stdio: 'ignore', windowsHide: true,
       env: { ...process.env, PYTHONPATH: APP_DIR, PLAYVAULT_HOME: ROOT },
     })

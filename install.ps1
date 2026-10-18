@@ -142,8 +142,8 @@ $desktop = [Environment]::GetFolderPath('Desktop')
 foreach ($dir in @($startMenu, $desktop)) {
     if (-not $dir -or -not (Test-Path $dir)) { continue }
     $lnk = $shell.CreateShortcut((Join-Path $dir 'PlayVault.lnk'))
-    $lnk.TargetPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-    $lnk.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$(Join-Path $Root 'app\bin\playvault.ps1')`""
+    $lnk.TargetPath = Join-Path $env:SystemRoot 'System32\wscript.exe'
+    $lnk.Arguments = "`"$(Join-Path $Root 'app\bin\playvault.vbs')`""
     $lnk.WorkingDirectory = $Root
     $lnk.Description = 'Epic Games + GOG library'
     if ($icoPath) { $lnk.IconLocation = $icoPath }

@@ -31,6 +31,8 @@ def pid_alive(pid):
         pid = int(pid)
     except (TypeError, ValueError):
         return False
+    if pid <= 0:  # os.kill(-1, 0) means every process on Linux
+        return False
     if IS_WINDOWS:
         # os.kill(pid, 0) would terminate the process on Windows, so ask the OS instead
         import ctypes

@@ -138,13 +138,17 @@ $icoPath = Join-Path $Root 'icon.ico'
 try { New-IcoFromPng (Join-Path $Root 'app\art\icon.png') $icoPath } catch { $icoPath = $null }
 $startMenu = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
 $shell = New-Object -ComObject WScript.Shell
-$lnk = $shell.CreateShortcut((Join-Path $startMenu 'PlayVault.lnk'))
-$lnk.TargetPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-$lnk.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$(Join-Path $Root 'app\bin\playvault.ps1')`""
-$lnk.WorkingDirectory = $Root
-$lnk.Description = 'Epic Games + GOG library'
-if ($icoPath) { $lnk.IconLocation = $icoPath }
-$lnk.Save()
+$desktop = [Environment]::GetFolderPath('Desktop')
+foreach ($dir in @($startMenu, $desktop)) {
+    if (-not $dir -or -not (Test-Path $dir)) { continue }
+    $lnk = $shell.CreateShortcut((Join-Path $dir 'PlayVault.lnk'))
+    $lnk.TargetPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $lnk.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$(Join-Path $Root 'app\bin\playvault.ps1')`""
+    $lnk.WorkingDirectory = $Root
+    $lnk.Description = 'Epic Games + GOG library'
+    if ($icoPath) { $lnk.IconLocation = $icoPath }
+    $lnk.Save()
+}
 
 # ------------------------------------------------------------------ Steam tile
 function Steam-Py($what) {

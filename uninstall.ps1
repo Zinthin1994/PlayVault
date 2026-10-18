@@ -17,6 +17,7 @@ foreach ($d in 'app', 'app.prev', 'update', 'venv', 'gogdl', 'electron') {
 }
 Remove-Item -Force (Join-Path $Root 'icon.ico') -ErrorAction SilentlyContinue
 Remove-Item -Force (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\PlayVault.lnk') -ErrorAction SilentlyContinue
+Remove-Item -Force (Join-Path ([Environment]::GetFolderPath('Desktop')) 'PlayVault.lnk') -ErrorAction SilentlyContinue
 if ($All) {
     Remove-Item -Recurse -Force $Root -ErrorAction SilentlyContinue
     Write-Host 'PlayVault and all its data removed.'

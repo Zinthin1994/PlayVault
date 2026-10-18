@@ -84,7 +84,7 @@ def _cmd(args):
 def run(args, timeout=600):
     try:
         p = subprocess.run(_cmd(args), capture_output=True, text=True, timeout=timeout,
-                           env=env(), stdin=subprocess.DEVNULL)
+                           env=env(), stdin=subprocess.DEVNULL, **host.hidden_kwargs())
         return p.returncode, p.stdout, p.stderr
     except subprocess.TimeoutExpired:
         return 124, '', f'gogdl {args[0]} timed out'
@@ -103,7 +103,7 @@ def version():
         return None
     try:
         p = subprocess.run([binary(), '--version'], capture_output=True, text=True, timeout=30,
-                           env=env(), stdin=subprocess.DEVNULL)
+                           env=env(), stdin=subprocess.DEVNULL, **host.hidden_kwargs())
         return (p.stdout or p.stderr).strip().splitlines()[-1] if (p.stdout or p.stderr).strip() else None
     except Exception:
         return None

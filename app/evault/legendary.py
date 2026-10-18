@@ -44,7 +44,7 @@ def run(args, timeout=600, yes=True):
     cmd = [b] + (['-y'] if yes else []) + list(args)
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
-                           env=env(), stdin=subprocess.DEVNULL)
+                           env=env(), stdin=subprocess.DEVNULL, **host.hidden_kwargs())
         return p.returncode, p.stdout, p.stderr
     except subprocess.TimeoutExpired:
         return 124, '', f'legendary {args[0]} timed out'

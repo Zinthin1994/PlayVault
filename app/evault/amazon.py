@@ -85,7 +85,9 @@ def popen(args):
                             stdin=subprocess.DEVNULL, **host.spawn_kwargs())
 
 
-NILE_URL = 'https://github.com/imLinguin/nile/archive/refs/tags/v1.2.0.zip'  # newer main is broken upstream
+NILE_URL = 'https://github.com/imLinguin/nile/archive/e9ca6ccb8c2a46f1adc7eea8eaba1a3017d38d58.zip'
+# ^ nile 1.2.0 + setuptools fix, just before upstream deleted a module it still imports (2026-10-29).
+# The v1.2.0 tag itself does not build (flat-layout error) and main crashes on start.
 _ensure_lock = threading.Lock()
 
 

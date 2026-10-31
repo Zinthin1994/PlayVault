@@ -11,7 +11,7 @@ $ProgressPreference = 'SilentlyContinue'   # Invoke-WebRequest is far faster wit
 $ElectronVersion = '31.7.7'
 $GogdlFallbackVersion = 'v1.3.0'
 $LegendaryUrl = 'https://github.com/derrod/legendary/archive/refs/heads/master.zip'
-$NileUrl = 'https://github.com/imLinguin/nile/archive/refs/tags/v1.2.0.zip'
+$NileUrl = 'https://github.com/imLinguin/nile/archive/e9ca6ccb8c2a46f1adc7eea8eaba1a3017d38d58.zip'
 
 $Src = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Root = if ($env:PLAYVAULT_HOME) { $env:PLAYVAULT_HOME } else { Join-Path $env:LOCALAPPDATA 'PlayVault' }

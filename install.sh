@@ -11,7 +11,7 @@ ELECTRON_VERSION="31.7.7"
 UMU_FALLBACK_VERSION="1.4.4"
 GOGDL_FALLBACK_VERSION="v1.3.0"
 LEGENDARY_URL="https://github.com/derrod/legendary/archive/refs/heads/master.zip"
-NILE_URL="https://github.com/imLinguin/nile/archive/refs/tags/v1.2.0.zip"
+NILE_URL="https://github.com/imLinguin/nile/archive/e9ca6ccb8c2a46f1adc7eea8eaba1a3017d38d58.zip"
 
 SRC="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 ROOT="${PLAYVAULT_HOME:-$HOME/.local/share/playvault}"

@@ -11,6 +11,7 @@ $ProgressPreference = 'SilentlyContinue'   # Invoke-WebRequest is far faster wit
 $ElectronVersion = '31.7.7'
 $GogdlFallbackVersion = 'v1.3.0'
 $LegendaryUrl = 'https://github.com/derrod/legendary/archive/refs/heads/master.zip'
+$NileUrl = 'https://github.com/imLinguin/nile/archive/refs/tags/v1.2.0.zip'
 
 $Src = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Root = if ($env:PLAYVAULT_HOME) { $env:PLAYVAULT_HOME } else { Join-Path $env:LOCALAPPDATA 'PlayVault' }
@@ -81,6 +82,15 @@ if ($LASTEXITCODE -ne 0) {
 & (Join-Path $Root 'venv\Scripts\legendary.exe') --version
 if ($LASTEXITCODE -ne 0) { Die 'legendary did not install correctly' }
 
+# ------------------------------------------------------------------ nile (Amazon Games client)
+Bold 'Installing nile (Amazon Games client)'
+& $VenvPy -m pip install --quiet --upgrade $NileUrl
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path (Join-Path $Root 'venv\Scripts\nile.exe'))) {
+    Warn 'Installing nile failed - Amazon Games support will be unavailable until you re-run the installer'
+} else {
+    & (Join-Path $Root 'venv\Scripts\nile.exe') --version
+}
+
 # ------------------------------------------------------------------ gogdl (GOG client)
 Bold 'Installing gogdl (GOG client from Heroic)'
 $gogdlAsset = if ($Arm) { 'gogdl_windows_arm64.exe' } else { 'gogdl_windows_x86_64.exe' }
@@ -145,7 +155,7 @@ foreach ($dir in @($startMenu, $desktop)) {
     $lnk.TargetPath = Join-Path $env:SystemRoot 'System32\wscript.exe'
     $lnk.Arguments = "`"$(Join-Path $Root 'app\bin\playvault.vbs')`""
     $lnk.WorkingDirectory = $Root
-    $lnk.Description = 'Epic Games + GOG library'
+    $lnk.Description = 'Epic Games + GOG + Amazon Games library'
     if ($icoPath) { $lnk.IconLocation = $icoPath }
     $lnk.Save()
 }
@@ -185,7 +195,7 @@ Write-Host @"
   PlayVault is installed.
 
   * Start it:      Start menu > PlayVault (or from your Steam library, Non-Steam)
-  * First start:   sign in with your Epic and/or GOG account.
+  * First start:   sign in with your Epic, GOG and/or Amazon Games account.
 
   Logs: $Root\data\logs
   Update later by running this installer again (or from Settings > PlayVault updates).

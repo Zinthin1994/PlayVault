@@ -11,7 +11,7 @@ import subprocess
 import threading
 import time
 
-from . import gog, host, legendary, paths, proton, store
+from . import amazon, gog, host, legendary, paths, proton, store
 from .util import log
 
 SERIAL = ('install', 'update', 'repair', 'move', 'prepare')
@@ -220,6 +220,8 @@ class JobManager:
     def _do_install(self, job):
         s = store.get_settings()
         root = job['opts'].get('base_path') or s['install_dir']
+        if amazon.is_amazon(job['app_name']):
+            return self._amazon_run(job, 'install', ['--base-path', paths.store_dir(root, 'amazon')], s)
         if gog.is_gog(job['app_name']):
             return self._gog_install(job, s, paths.store_dir(root, 'gog'))
         base = paths.store_dir(root, 'epic')
@@ -227,6 +229,22 @@ class JobManager:
         args = ['install', job['app_name'], '--base-path', base, '--skip-sdl']
         args.append('--with-dlcs' if s.get('install_dlc') else '--skip-dlcs')
         self._run_legendary(job, args + self._workers(s))
+
+    def _amazon_run(self, job, command, extra, s):
+        """nile install / update / verify <id>. nile writes installed.json itself when it finishes."""
+        p = amazon.pid(job['app_name'])
+        if command == 'install':
+            os.makedirs(extra[1], exist_ok=True)
+            job['message'] = 'Preparing download'
+            self.on_change()
+            try:
+                job['download_size_mb'] = (amazon.info(p)['download'] or 0) / 1048576 or None
+            except Exception as e:
+                log.warning('Amazon size lookup failed: %r', e)
+        args = [command, p] + extra + (['--max-workers', str(int(s['max_workers']))] if s.get('max_workers') else [])
+        self._run_tool(job, amazon.popen(args), 'nile')
+        if not job['_cancel'] and job['app_name'] not in amazon.installed():
+            raise RuntimeError('nile finished but did not register the install - see Settings > About for the log')
 
     def _gog_install(self, job, s, base):
         g = gog.gid(job['app_name'])
@@ -256,6 +274,8 @@ class JobManager:
 
     def _do_update(self, job):
         s = store.get_settings()
+        if amazon.is_amazon(job['app_name']):
+            return self._amazon_run(job, 'update', [], s)
         if gog.is_gog(job['app_name']):
             inst = self._gog_inst(job)
             args = ['update', inst['id'], '--platform', inst['platform'], '--path', inst['install_path'],
@@ -272,6 +292,8 @@ class JobManager:
 
     def _do_repair(self, job):
         job['message'] = 'Verifying files'
+        if amazon.is_amazon(job['app_name']):
+            return self._amazon_run(job, 'verify', [], store.get_settings())
         if gog.is_gog(job['app_name']):
             inst = self._gog_inst(job)
             s = store.get_settings()
@@ -290,7 +312,11 @@ class JobManager:
             self.cancel(other['id'])
             time.sleep(2)
         job['message'] = 'Removing files'
-        if gog.is_gog(job['app_name']):
+        if amazon.is_amazon(job['app_name']):
+            rc, out, err = amazon.run(['uninstall', amazon.pid(job['app_name'])], timeout=1800)
+            if job['app_name'] in amazon.installed():
+                raise RuntimeError((err or out).strip().splitlines()[-1] if (err or out).strip() else 'Uninstall failed')
+        elif gog.is_gog(job['app_name']):
             inst = self._gog_inst(job)
             path = inst.get('install_path')
             real = os.path.realpath(path) if path else ''
@@ -307,12 +333,13 @@ class JobManager:
                 shutil.rmtree(pfx, ignore_errors=True)
 
     def _do_move(self, job):
+        is_amazon = amazon.is_amazon(job['app_name'])
         is_gog = gog.is_gog(job['app_name'])
-        inst = (gog.installed() if is_gog else legendary.installed()).get(job['app_name'])
+        inst = (amazon.installed() if is_amazon else gog.installed() if is_gog else legendary.installed()).get(job['app_name'])
         if not inst:
             raise RuntimeError('Game is not installed')
         src = inst['install_path']
-        new_base = paths.store_dir(job['opts']['base_path'], 'gog' if is_gog else 'epic')
+        new_base = paths.store_dir(job['opts']['base_path'], 'amazon' if is_amazon else 'gog' if is_gog else 'epic')
         dst = os.path.join(new_base, os.path.basename(src.rstrip('/')))
         if os.path.exists(dst):
             raise RuntimeError(f'Target already exists: {dst}')
@@ -349,6 +376,9 @@ class JobManager:
                 job['eta'] = int((total - done) / (done / elapsed)) if done else None
                 self.on_change()
             shutil.rmtree(src, ignore_errors=True)
+        if is_amazon:
+            amazon.set_install_path(inst['id'], dst)
+            return
         if is_gog:
             gog.register_install(inst['id'], inst['platform'], dst)
             return

@@ -28,6 +28,15 @@ const STORES = {
     // GOG puts the code in the redirect URL itself
     code: async (wc, url) => new URL(url).searchParams.get('code'),
   },
+  amazon: {
+    title: 'Sign in to Amazon Games',
+    // the login URL carries one-time PKCE data, so the backend (nile) makes it for each sign-in
+    urlFromBackend: '/api/auth/amazon/url',
+    partition: 'persist:amazonlogin',
+    // Amazon sends you to amazon.com with the code in the address
+    match: (url) => url.startsWith('https://www.amazon.com/') && url.includes('openid.oa2.authorization_code='),
+    code: async (wc, url) => new URL(url).searchParams.get('openid.oa2.authorization_code'),
+  },
 };
 
 const WIN = process.platform === 'win32';
@@ -44,11 +53,11 @@ let runningSince = 0;
 app.commandLine.appendSwitch('disable-gpu-sandbox');
 app.commandLine.appendSwitch('enable-gamepad-button-axis-events');
 
-function request(method, p, body) {
+function request(method, p, body, timeout = 4000) {
   return new Promise((resolve) => {
     const data = body ? JSON.stringify(body) : null;
     const req = http.request(`${BASE}${p}`, {
-      method, timeout: 4000,
+      method, timeout,
       headers: data ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) } : {},
     }, (res) => {
       let out = '';
@@ -176,8 +185,15 @@ ipcMain.on('osk', (e, msg) => {
 function storeLogin(storeId) {
   const cfg = STORES[storeId];
   if (!cfg) return Promise.resolve({ error: 'Unknown store' });
-  return new Promise((resolve) => {
+  return new Promise(async (resolve) => {
     let done = false;
+    let loginUrl = cfg.url;
+    if (cfg.urlFromBackend) {
+      const r = await request('GET', cfg.urlFromBackend, null, 120000);
+      if (!r || !r.url) { resolve({ error: (r && r.error) || 'Could not start the sign-in' }); return; }
+      loginUrl = r.url;
+    }
+    const matches = cfg.match || ((u) => u.startsWith(cfg.redirect));
     const ses = session.fromPartition(cfg.partition);
     ses.setUserAgent(plainUserAgent(ses.getUserAgent()));
     const prefs = loginPrefs(cfg.partition);
@@ -189,7 +205,7 @@ function storeLogin(storeId) {
     const check = async (url) => {
       if (done || lw.isDestroyed()) return;
       url = typeof url === 'string' ? url : lw.webContents.getURL();
-      if (!url.startsWith(cfg.redirect)) return;
+      if (!matches(url)) return;
       try {
         const code = await cfg.code(lw.webContents, url);
         finish(code ? { code } : { error: 'The store did not return a sign-in code - please try again' });
@@ -198,10 +214,10 @@ function storeLogin(storeId) {
     lw.webContents.on('did-finish-load', () => check());
     lw.webContents.on('did-navigate', (e, url) => check(url));
     lw.webContents.on('did-navigate-in-page', (e, url) => check(url));
-    if (storeId === 'gog') {
+    if (storeId === 'gog' || storeId === 'amazon') {
       // the code is in the redirect URL, so grab it before the (blank) page even loads
-      lw.webContents.on('will-redirect', (e, url) => { if (url.startsWith(cfg.redirect)) { e.preventDefault(); check(url); } });
-      lw.webContents.on('will-navigate', (e, url) => { if (url.startsWith(cfg.redirect)) { e.preventDefault(); check(url); } });
+      lw.webContents.on('will-redirect', (e, url) => { if (matches(url)) { e.preventDefault(); check(url); } });
+      lw.webContents.on('will-navigate', (e, url) => { if (matches(url)) { e.preventDefault(); check(url); } });
     }
     // Social logins (Google, etc.) may open a popup that reports back to the store page,
     // so popups open as real child windows with the same keyboard.
@@ -216,7 +232,7 @@ function storeLogin(storeId) {
       if (input.type === 'keyDown' && input.key === 'Escape') finish({ cancelled: true });
     });
     lw.on('closed', () => { if (!done) { done = true; resolve({ cancelled: true }); } });
-    lw.loadURL(cfg.url);
+    lw.loadURL(loginUrl);
   });
 }
 

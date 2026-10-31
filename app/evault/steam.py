@@ -215,6 +215,14 @@ def gog_art(db, image=None):
             '_logo': one(db.get('logo'))}  # art_sources tries Steam's own art first when there is a Steam match
 
 
+def amazon_art(entry):
+    """Store artwork fallbacks for an Amazon Games entry (library_index() item)."""
+    entry = entry or {}
+    one = lambda *xs: [x for x in xs if x]
+    return {'p': one(entry.get('crown')), '': one(entry.get('background'), entry.get('crown')),
+            '_hero': one(entry.get('background')), '_logo': one(entry.get('logo'))}
+
+
 def art_sources(fallbacks, steam_appid):
     base = []
     if steam_appid:

@@ -45,6 +45,15 @@ GOG_INSTALLED = os.path.join(GOG, 'installed.json')
 GOG_BUILDS = os.path.join(GOG, 'builds.json')
 GOG_SAVES = os.path.join(GOG, 'saves.json')
 
+# Amazon Games (nile). NILE_CONFIG_PATH=AMAZON makes nile keep its files in AMAZON/nile
+AMAZON = os.path.join(DATA, 'amazon')
+AMAZON_CFG = os.path.join(AMAZON, 'nile')
+AMAZON_USER = os.path.join(AMAZON_CFG, 'current_user.json')
+AMAZON_LIBRARY = os.path.join(AMAZON_CFG, 'library.json')
+AMAZON_INSTALLED = os.path.join(AMAZON_CFG, 'installed.json')
+AMAZON_UPDATES = os.path.join(AMAZON, 'updates.json')
+AMAZON_LOGIN = os.path.join(AMAZON, 'login_pending.json')
+
 UPDATE_DIR = os.path.join(ROOT, 'update')
 UPDATE_STAGED = os.path.join(UPDATE_DIR, 'app')          # unpacked app/ of the new version
 UPDATE_READY = os.path.join(UPDATE_DIR, 'ready.json')    # staged and verified: bin/playvault swaps it in
@@ -58,7 +67,8 @@ ELECTRON_VERSION_FILE = os.path.join(ROOT, 'electron', '.version')
 _VENV_BIN, _EXE, _SCRIPT = ('Scripts', '.exe', '.cmd') if IS_WINDOWS else ('bin', '', '')
 LEGENDARY_BIN = os.path.join(ROOT, 'venv', _VENV_BIN, 'legendary' + _EXE)
 VENV_PYTHON = os.path.join(ROOT, 'venv', _VENV_BIN, 'python' + _EXE)
-GOGDL_BIN = os.path.join(ROOT, 'gogdl', 'gogdl' + _EXE)
+NILE_BIN = os.path.join(ROOT, 'venv', _VENV_BIN, 'nile' + _EXE)
+GOGDL_BIN =os.path.join(ROOT, 'gogdl', 'gogdl' + _EXE)
 UMU_RUN = os.path.join(ROOT, 'umu', 'umu-run')
 LAUNCH_SCRIPT = os.path.join(APP, 'bin', 'playvault-launch' + _SCRIPT)
 APP_SCRIPT = os.path.join(APP, 'bin', 'playvault' + _SCRIPT)
@@ -67,7 +77,7 @@ APP_ART = os.path.join(APP, 'art')
 
 # games go to <root>/Epic/<game> and <root>/GOG/<game>
 DEFAULT_GAMES_DIR = os.path.join(HOME, 'Games')
-STORE_DIRS = {'epic': 'Epic', 'gog': 'GOG'}
+STORE_DIRS = {'epic': 'Epic', 'gog': 'GOG', 'amazon': 'Amazon'}
 
 PORT = int(os.environ.get('PLAYVAULT_PORT') or os.environ.get('EPICVAULT_PORT') or '47821')
 
@@ -84,5 +94,5 @@ def store_dir(root, store):
 
 
 def ensure():
-    for d in (DATA, LEGENDARY_CONFIG, GOG, PREFIXES, LOGS, PLAYTIME, ART):
+    for d in (DATA, LEGENDARY_CONFIG, GOG, AMAZON, PREFIXES, LOGS, PLAYTIME, ART):
         os.makedirs(d, exist_ok=True)

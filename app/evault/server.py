@@ -12,7 +12,7 @@ import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import VERSION, gog, host, legendary, paths, proton, ratings as ratings_mod, steam, store, system, umu
+from . import VERSION, amazon, gog, host, legendary, paths, proton, ratings as ratings_mod, steam, store, system, umu
 from .jobs import JobManager
 from .updater import Updater
 from .util import read_json, write_json, pid_alive, log
@@ -63,6 +63,7 @@ class App:
         self.steam_cache = (0, {})
         self.legendary_version = None
         self.gogdl_version = None
+        self.nile_version = None
         self.ratings = ratings_mod.Ratings(on_update=self.bump)
         s = store.get_settings()
         self.ratings.country = s.get('country', 'us')
@@ -81,7 +82,9 @@ class App:
     def _startup(self):
         self.legendary_version = legendary.version()
         self.gogdl_version = gog.version()
+        self.nile_version = amazon.version() if amazon.available() else None
         threading.Thread(target=self._gog_check_updates, daemon=True).start()
+        threading.Thread(target=self._amazon_check_updates, daemon=True).start()
         stale = False
         if legendary.user():
             idx = legendary.library_index()
@@ -89,6 +92,9 @@ class App:
         if gog.user():
             idx = gog.library_index()
             stale |= not idx['games'] or time.time() - idx.get('updated', 0) > 6 * 3600
+        if amazon.user():
+            idx = amazon.library_index()
+            stale |= not idx or time.time() - (os.path.getmtime(paths.AMAZON_LIBRARY) if os.path.exists(paths.AMAZON_LIBRARY) else 0) > 6 * 3600
         if stale:
             self.refresh_library()
         else:
@@ -116,6 +122,13 @@ class App:
                 log.warning('GOG update check for %s failed: %r', i.get('id'), e)
         self.bump()
 
+    def _amazon_check_updates(self):
+        try:
+            amazon.refresh_updates()
+        except Exception as e:
+            log.warning('Amazon update check failed: %r', e)
+        self.bump()
+
     def refresh_library(self, force=False):
         with self.lock:
             if self.library_status['refreshing']:
@@ -136,6 +149,13 @@ class App:
                 except Exception as e:
                     log.warning('GOG library refresh failed: %r', e)
                     errors.append(f'GOG: {e}')
+            if amazon.user():
+                try:
+                    amazon.refresh_library(force)
+                    amazon.refresh_updates(force=True)
+                except Exception as e:
+                    log.warning('Amazon library refresh failed: %r', e)
+                    errors.append(f'Amazon: {e}')
         finally:
             # always clear the flag, or the UI would show "refreshing" until the backend restarts
             with self.lock:
@@ -151,6 +171,7 @@ class App:
         games = store.all_games()
         inst = legendary.installed()
         ginst = gog.installed()
+        ainst = amazon.installed()
         items = []
         for e in legendary.library_index()['games']:
             app = e['app_name']
@@ -164,6 +185,9 @@ class App:
             if not gdb.get('fetched'):
                 continue  # wait for the GOG catalog lookup; it usually knows the exact Steam id
             items.append((app in ginst, app, e['title'], None, gdb.get('steam_appid')))
+        for e in self._amazon_entries():
+            app = amazon.key(e['id'])
+            items.append((app in ainst, app, e['title'], None, None))
         # installed games first so the stuff you play gets ratings first
         items.sort(key=lambda x: not x[0])
         for _, app, title, ns, hint in items:
@@ -185,6 +209,8 @@ class App:
                 inst = gog.installed().get(app)
                 if inst:
                     threading.Thread(target=gog.cloud_locations, args=(inst,), daemon=True).start()
+        if amazon.is_amazon(app) and job['kind'] in ('install', 'update', 'repair'):
+            amazon.clear_update(amazon.pid(app))
         elif job['kind'] == 'uninstall':
             if s.get('remove_steam_on_uninstall') and app in self.steam_shortcuts():
                 self.steam_remove([app])
@@ -203,10 +229,28 @@ class App:
                             'platforms': [i.get('platform', 'windows')]})
         return out
 
+    @staticmethod
+    def _amazon_entries():
+        """Owned Amazon games, plus installed ones (still playable after signing out)."""
+        lib = amazon.library_index()
+        seen = {e['id'] for e in lib}
+        out = list(lib)
+        for app, i in amazon.installed().items():
+            if i['id'] not in seen:
+                out.append({'id': i['id'], 'title': i['title'], 'developer': None, 'publisher': None, 'icon': None,
+                            'logo': None, 'background': None, 'crown': None, 'genres': [], 'description': None,
+                            'release_date': None})
+        return out
+
     def installed_any(self, app):
+        if amazon.is_amazon(app):
+            return app in amazon.installed()
         return app in (gog.installed() if gog.is_gog(app) else legendary.installed())
 
     def title(self, app):
+        if amazon.is_amazon(app):
+            e = amazon.library_entry(amazon.pid(app)) or {}
+            return e.get('title') or (amazon.installed().get(app) or {}).get('title') or app
         if gog.is_gog(app):
             i = gog.installed().get(app) or {}
             e = gog.library_entry(gog.gid(app)) or {}
@@ -236,13 +280,20 @@ class App:
     def steam_add(self, apps):
         inst = legendary.installed()
         ginst = gog.installed()
+        ainst = amazon.installed()
         rat = self.ratings.snapshot()
         games = store.all_games()
         added = []
         for app in apps:
             g = store.get_game(app, games)
             sid = g.get('steam_appid') or (rat.get(app) or {}).get('steam_appid')
-            if gog.is_gog(app):
+            if amazon.is_amazon(app):
+                if app not in ainst:
+                    continue
+                entry = amazon.library_entry(amazon.pid(app)) or {}
+                title = entry.get('title') or ainst[app].get('title') or app
+                fallbacks = steam.amazon_art(entry)
+            elif gog.is_gog(app):
                 if app not in ginst:
                     continue
                 gid = gog.gid(app)
@@ -441,6 +492,39 @@ class App:
             })
         return rec
 
+    def _amazon_record(self, e, inst, g, r, pt, job, ours, pend, detail=False):
+        app = amazon.key(e['id'])
+        title = e.get('title') or (inst or {}).get('title') or app
+        sid = g.get('steam_appid') or r.get('steam_appid')
+        rec = self._common(app, title, inst, g, r, pt, job, ours, pend, sid, detail)
+        rec.update({
+            'store': 'amazon',
+            'developer': e.get('developer'),
+            'cover': steam_art(sid, 'library_600x900_2x.jpg') or e.get('crown') or e.get('icon') or e.get('background'),
+            'cover_fallback': (e.get('crown') or e.get('icon')) if sid else e.get('background'),
+            'update_available': bool(inst and amazon.update_available(inst)),
+            'third_party': None,
+            'platforms': ['windows'],
+        })
+        if detail:
+            rec.update({
+                'description': e.get('description'),
+                'publisher': e.get('publisher'),
+                'hero': steam_art(sid, 'library_hero.jpg') or e.get('background'),
+                'hero_fallback': e.get('background') or e.get('crown'),
+                'logo': steam_art(sid, 'logo.png') or e.get('logo'),
+                'logo_fallback': e.get('logo'),
+                'wide': e.get('background') or e.get('crown'),
+                'version': (inst or {}).get('version'),
+                'latest_version': None,
+                'can_run_offline': False,
+                'cloud_saves': False,
+                'platform': 'windows' if inst else None,
+                'genres': rec['genres'] or e.get('genres') or [],
+                'release_date': rec['release_date'] or e.get('release_date'),
+            })
+        return rec
+
     @staticmethod
     def _gog_update_cached(inst):
         cache = read_json(paths.GOG_BUILDS, {}) or {}
@@ -474,10 +558,23 @@ class App:
             app = gog.key(e['id'])
             out.append(self._gog_record(e, ginst.get(app), db.get(e['id']) or {}, store.get_game(app, games),
                                         rat.get(app) or {}, pts.get(app) or {}, jobs.get(app), ours, pend))
+        ainst = amazon.installed()
+        for e in self._amazon_entries():
+            app = amazon.key(e['id'])
+            out.append(self._amazon_record(e, ainst.get(app), store.get_game(app, games), rat.get(app) or {},
+                                           pts.get(app) or {}, jobs.get(app), ours, pend))
         return out
 
     def detail(self, app):
         ours, pend = self.steam_state()
+        if amazon.is_amazon(app):
+            e = next((x for x in self._amazon_entries() if x['id'] == amazon.pid(app)), None)
+            if not e:
+                return None
+            rec = self._amazon_record(e, amazon.installed().get(app), store.get_game(app), self.ratings.get(app),
+                                      store.get_playtime(app), self.jobs.active_for(app), ours, pend, detail=True)
+            rec['dlcs'] = []
+            return rec
         if gog.is_gog(app):
             gid = gog.gid(app)
             e = next((x for x in self._gog_entries() if x['id'] == gid), None)
@@ -506,7 +603,9 @@ class App:
         ck = f'{app}:{platform}' if platform else app
         if ck in cache and not refresh:
             return cache[ck]
-        if gog.is_gog(app):
+        if amazon.is_amazon(app):
+            sz = amazon.info(amazon.pid(app))
+        elif gog.is_gog(app):
             s = store.get_settings()
             info = gog.info(gog.gid(app), platform or 'windows', s.get('gog_language') or 'en-US',
                             bool(s.get('install_dlc')))
@@ -524,13 +623,15 @@ class App:
         active = [j for j in jobs if j['status'] in ('queued', 'running')]
         epic_user = legendary.user()
         gog_user = gog.user()
+        amazon_user = amazon.user()
         return {
             'version': self.version,
             'app_version': VERSION,
-            'user': epic_user or gog_user,
-            'accounts': {'epic': epic_user, 'gog': gog_user},
+            'user': epic_user or gog_user or amazon_user,
+            'accounts': {'epic': epic_user, 'gog': gog_user, 'amazon': amazon_user},
             'legendary': legendary.available(),
             'gogdl': gog.available(),
+            'nile': amazon.available(),
             'umu': paths.IS_WINDOWS or bool(umu.umu_run()),  # Windows has no Proton runner to miss
             'platform': 'windows' if paths.IS_WINDOWS else 'linux',
             'library': self.library_status,
@@ -557,6 +658,7 @@ class App:
             'app_version': VERSION,
             'legendary_version': self.legendary_version,
             'gogdl_version': self.gogdl_version,
+            'nile_version': self.nile_version,
             'platform': 'windows' if paths.IS_WINDOWS else 'linux',
             'umu_path': umu.umu_run(),
             'steam_root': proton.steam_root(),
@@ -667,7 +769,7 @@ def _bg(fn, *a, **kw):
 
 
 def _namespace(app):
-    if gog.is_gog(app):
+    if gog.is_gog(app) or amazon.is_amazon(app):
         return None
     return ((legendary.metadata(app) or {}).get('metadata') or {}).get('namespace')
 
@@ -719,6 +821,12 @@ def route(method, p, q, body):
             return a.system_info()
         if p == ['auth', 'gog', 'url']:
             return {'url': gog.LOGIN_URL}
+        if p == ['auth', 'amazon', 'url']:
+            # starts a sign-in: remembers the PKCE data that the returned code belongs to
+            try:
+                return {'url': amazon.login_url()}
+            except RuntimeError as e:
+                return {'error': str(e)}
         if p == ['update']:
             return a.updater.snapshot()
         return None
@@ -744,6 +852,16 @@ def route(method, p, q, body):
         gog.logout()
         a.bump()
         return {'ok': True}
+    if p == ['auth', 'amazon', 'code']:
+        ok, msg = amazon.login_with_code(body.get('code', ''))
+        if ok:
+            _bg(a.refresh_library)
+        a.bump()
+        return {'ok': ok, 'message': msg}
+    if p == ['auth', 'amazon', 'logout']:
+        amazon.logout()
+        a.bump()
+        return {'ok': True}
     if p == ['library', 'refresh']:
         _bg(a.refresh_library, bool(body.get('force')))
         return {'ok': True}
@@ -765,6 +883,9 @@ def route(method, p, q, body):
                 queued.append(a.jobs.add('update', app, a.title(app)))
         for app, i in gog.installed().items():
             if gog.update_available(i):
+                queued.append(a.jobs.add('update', app, a.title(app)))
+        for app, i in amazon.installed().items():
+            if amazon.update_available(i):
                 queued.append(a.jobs.add('update', app, a.title(app)))
         return {'queued': len(queued)}
     if p == ['repair']:
@@ -826,7 +947,8 @@ def route(method, p, q, body):
     if p == ['steam', 'add']:
         apps = body.get('apps')
         if apps == 'all':
-            apps = [k for k, v in legendary.installed().items() if not v.get('is_dlc')] + list(gog.installed())
+            apps = [k for k, v in legendary.installed().items() if not v.get('is_dlc')] + list(gog.installed()) \
+                + list(amazon.installed())
         return {'added': a.steam_add(apps or [])}
     if p == ['steam', 'remove']:
         a.steam_remove(body.get('apps') or [])

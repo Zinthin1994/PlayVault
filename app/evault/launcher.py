@@ -5,6 +5,8 @@ Used by both the PlayVault UI and the Steam library shortcuts it creates:
 
 Epic: cloud-save download -> fresh Epic auth via legendary -> umu-run game.exe
       -> wait -> playtime -> cloud-save upload.
+Amazon: nile's dry run gives the exe + Amazon Games SDK environment, then the same as GOG
+      (umu/Proton on SteamOS, native on Windows). No cloud saves (Amazon has none).
 GOG:  cloud-save download (gogdl) -> umu-run <primary playTask> (or the native
       Linux start.sh) -> wait -> playtime -> cloud-save upload. No login needed,
       GOG games are DRM-free.
@@ -19,7 +21,7 @@ import subprocess
 import sys
 import time
 
-from . import gog, host, legendary, paths, proton, store, umu
+from . import amazon, gog, host, legendary, paths, proton, store, umu
 from .util import read_json, write_json
 
 _child = None
@@ -117,7 +119,58 @@ def _play(app_name, cmd, cwd, env, log):
     return rc, duration
 
 
+def _wine_path(p):
+    """A Linux path as Wine sees it (the Z: drive maps /)."""
+    return 'Z:' + str(p).replace('/', '\\')
+
+
+def launch_amazon(app_name, extra, log):
+    s = store.get_settings()
+    g = store.get_game(app_name)
+    inst = amazon.installed().get(app_name)
+    if not inst:
+        log(f'{app_name} is not installed.')
+        return 1, 'Game is not installed'
+    try:
+        exe, task_args, cwd, game_env = amazon.launch_info(amazon.pid(app_name))
+    except RuntimeError as e:
+        log(str(e))
+        return 1, str(e)
+    cmd_tail = list(task_args) + (_split(g['args']) if g['args'] else []) + list(extra)
+
+    if paths.IS_WINDOWS:
+        env = _user_env(_clean_env(os.environ.copy()), g)
+        env.update(game_env)
+        cmd = [exe] + cmd_tail
+        log(f'Native Windows build: {shlex.join(cmd)}')
+        rc, duration = _play(app_name, cmd, cwd, env, log)
+    else:
+        runner = umu.umu_run()
+        if not runner:
+            return 1, 'umu-launcher is missing - re-run the installer'
+        prefix = os.path.join(paths.PREFIXES, app_name)
+        os.makedirs(prefix, exist_ok=True)
+        ratings = read_json(paths.RATINGS, {}) or {}
+        steam_appid = g.get('steam_appid') or (ratings.get(app_name) or {}).get('steam_appid')
+        gameid = g.get('umu_gameid') or umu.game_id(amazon.pid(app_name), steam_appid, store='amazon')
+        env = _user_env(_proton_env(app_name, g, s, gameid, 'amazon', prefix), g)
+        # the Amazon Games SDK lives on the Linux side; the game sees it through Wine's Z: drive
+        env.update({k: (_wine_path(v) if k in ('FUEL_DIR', 'AMAZON_GAMES_SDK_PATH') else v)
+                    for k, v in game_env.items()})
+        cmd = [runner, exe] + cmd_tail
+        log(f'Proton: {env["PROTONPATH"]}   GAMEID: {gameid}   Prefix: {prefix}')
+        log('Command: ' + shlex.join(cmd))
+        if not _wine_root(prefix):
+            log('First launch: umu will set up the Proton prefix (and download Proton/runtime if needed).')
+        rc, duration = _play(app_name, cmd, cwd, env, log)
+    if duration < 15 and rc != 0:
+        return rc, f'Game exited after {int(duration)}s with code {rc} - see the launch log'
+    return 0, None
+
+
 def launch(app_name, extra, log):
+    if amazon.is_amazon(app_name):
+        return launch_amazon(app_name, extra, log)
     if gog.is_gog(app_name):
         return launch_gog(app_name, extra, log)
     return launch_epic(app_name, extra, log)

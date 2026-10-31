@@ -290,6 +290,9 @@ const ACTIONS = {
   loginGog: () => doLogin('gog'),
   loginCode: () => doLoginCode(),
   loginGogCode: () => doLoginGogCode(),
+  loginAmazon: () => doLogin('amazon'),
+  loginAmazonCode: () => doLoginAmazonCode(),
+  logoutAmazon: async () => { if (await confirmBox({ title: 'Sign out of Amazon Games?', msg: 'Installed Amazon games stay on disk, but need you to sign in again to launch.', ok: 'Sign out', danger: true })) { await safe(() => api('auth/amazon/logout', {})); tick(); } },
   loginMore: () => loginMore(),
   logoutGog: async () => { if (await confirmBox({ title: 'Sign out of GOG?', msg: 'Installed GOG games stay on disk and keep working.', ok: 'Sign out', danger: true })) { await safe(() => api('auth/gog/logout', {})); tick(); } },
   setting: (d) => editSetting(d.key),
@@ -541,9 +544,9 @@ function headerHtml() {
       ${tab('library', 'Library')}
       ${tab('downloads', 'Downloads', st.jobs_active ? `<span class="count">${st.jobs_active}</span>` : '')}
       ${tab('settings', 'Settings')}
-      ${tab('accounts', 'Accounts', st.accounts && (!st.accounts.epic || !st.accounts.gog) ? '<span class="count">+</span>' : '')}
+      ${tab('accounts', 'Accounts', st.accounts && (!st.accounts.epic || !st.accounts.gog || !st.accounts.amazon) ? '<span class="count">+</span>' : '')}
     <span class="lbrb">RB</span></div>
-    <div class="header-right">${playing}<span>${esc([...new Set([st.accounts && st.accounts.epic, st.accounts && st.accounts.gog].filter(Boolean))].join(' · ') || st.user || '')}</span>
+    <div class="header-right">${playing}<span>${esc([...new Set([st.accounts && st.accounts.epic, st.accounts && st.accounts.gog, st.accounts && st.accounts.amazon].filter(Boolean))].join(' · ') || st.user || '')}</span>
       <span class="clock">${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
       <button class="btn small focusable" data-action="exit" data-fid="hdr:exit" title="Exit PlayVault">⏻ Exit</button></div>`;
 }
@@ -584,15 +587,17 @@ function renderLogin() {
   const missing = [];
   if (!st.legendary) missing.push('legendary (Epic client) is not installed');
   if (!st.gogdl) missing.push('gogdl (GOG client) is not installed');
+  if (st.nile === false) missing.push('nile (Amazon Games client) is not installed');
   if (!st.umu) missing.push('umu-launcher (Proton runner) is not installed');
   return `<div class="login"><div class="box">
     <div class="logo-big">PV</div>
     <h1>PlayVault</h1>
-    <p>Your Epic Games and GOG libraries ${isWin() ? 'on your PC' : 'in Game Mode'} - with Steam ratings, ${isWin() ? 'playability info' : 'Proton'} and one-press play.<br>Sign in to a store to get started. You can add the other one later in Settings.</p>
+    <p>Your Epic Games, GOG and Amazon Games libraries ${isWin() ? 'on your PC' : 'in Game Mode'} - with Steam ratings, ${isWin() ? 'playability info' : 'Proton'} and one-press play.<br>Sign in to a store to get started. You can add the others later in Settings.</p>
     ${missing.length ? `<div class="banner error">${missing.map(esc).join('<br>')} - re-run ${isWin() ? 'install.ps1' : 'install.sh'}</div>` : ''}
     <div class="btns">
       ${window.vault ? `<button class="btn primary big focusable" data-action="login" data-fid="login" data-autofocus>Sign in with Epic Games</button>
-      <button class="btn primary big focusable" data-action="loginGog" data-fid="login-gog">Sign in with GOG</button>` : ''}
+      <button class="btn primary big focusable" data-action="loginGog" data-fid="login-gog">Sign in with GOG</button>
+      <button class="btn primary big focusable" data-action="loginAmazon" data-fid="login-amazon">Sign in with Amazon Games</button>` : ''}
       <button class="btn focusable" data-action="loginMore" data-fid="code">Sign in with a code instead</button>
       <button class="btn focusable" data-action="quit" data-fid="quit">Exit</button>
     </div>
@@ -603,8 +608,8 @@ function renderLogin() {
 async function submitCode(code, store = 'epic') {
   if (!code) return;
   toast('Signing in...');
-  const r = await safe(() => api(store === 'gog' ? 'auth/gog/code' : 'auth/code', { code }));
-  if (r && r.ok) { toast(`Signed in to ${store === 'gog' ? 'GOG' : 'Epic'} as ${r.message}`, 'good'); tick(); }
+  const r = await safe(() => api(store === 'gog' ? 'auth/gog/code' : store === 'amazon' ? 'auth/amazon/code' : 'auth/code', { code }));
+  if (r && r.ok) { toast(`Signed in to ${STORE_NAME[store]} as ${r.message}`, 'good'); tick(); }
   else if (r) toast(r.message || 'Sign-in failed', 'error');
 }
 async function doLogin(store = 'epic') {
@@ -615,9 +620,22 @@ async function doLogin(store = 'epic') {
 async function loginMore() {
   const v = await choose({ title: 'Sign in with a code', options: [
     { value: 'epic', label: 'Epic Games', desc: 'Use a code from legendary.gl/epiclogin' },
-    { value: 'gog', label: 'GOG', desc: 'Use the address GOG shows after signing in' }] });
+    { value: 'gog', label: 'GOG', desc: 'Use the address GOG shows after signing in' },
+    { value: 'amazon', label: 'Amazon Games', desc: 'Use the amazon.com address you land on after signing in' }] });
   if (v === 'epic') doLoginCode();
   if (v === 'gog') doLoginGogCode();
+  if (v === 'amazon') doLoginAmazonCode();
+}
+async function doLoginAmazonCode() {
+  const r = await safe(() => api('auth/amazon/url'));
+  if (!r) return;
+  if (r.error) { toast(r.error, 'error'); return; }
+  const ok = await confirmBox({
+    title: 'Sign in to Amazon Games with a code',
+    msg: 'On a phone or PC, open this address and sign in: <b>' + esc(r.url) + '</b><br>You end up on amazon.com - copy that page\'s full address (it contains <b>openid.oa2.authorization_code=</b>) and paste or type it on the next screen. Use it within a few minutes.',
+    ok: 'Continue', cancel: 'Back',
+  });
+  if (ok) submitCode(await keyboard({ title: 'Amazon address or code', hint: 'Paste the whole amazon.com address' }), 'amazon');
 }
 async function doLoginGogCode() {
   const ok = await confirmBox({
@@ -637,9 +655,9 @@ async function doLoginCode() {
 
 // ================================================================ library
 const FILTERS = [['all', 'All'], ['installed', 'Installed'], ['favorites', 'Favorites'], ['updates', 'Updates'], ['notinstalled', 'Not installed'],
-  ['epic', 'Epic'], ['gog', 'GOG'], ['hidden', 'Hidden']];
+  ['epic', 'Epic'], ['gog', 'GOG'], ['amazon', 'Amazon'], ['hidden', 'Hidden']];
 const SORTS = [['title', 'Title'], ['rating', 'Steam rating'], ['recent', 'Recently played'], ['playtime', 'Most played'], ['protondb', 'ProtonDB'], ['size', 'Install size']];
-const STORE_NAME = { epic: 'Epic', gog: 'GOG' };
+const STORE_NAME = { epic: 'Epic', gog: 'GOG', amazon: 'Amazon' };
 function multiStore() {
   if (S.multiFor !== S.games) { S.multiFor = S.games; S.multi = new Set(S.games.map((g) => g.store)).size > 1; }
   return S.multi;
@@ -649,7 +667,7 @@ function filtersShown() {
 }
 function applyFilter(list, f) {
   switch (f) {
-    case 'epic': case 'gog': return list.filter((g) => g.store === f && !g.hidden);
+    case 'epic': case 'gog': case 'amazon': return list.filter((g) => g.store === f && !g.hidden);
     case 'installed': return list.filter((g) => g.installed && !g.hidden);
     case 'favorites': return list.filter((g) => g.favorite && !g.hidden);
     case 'updates': return list.filter((g) => g.update_available && !g.hidden);
@@ -714,7 +732,7 @@ function libTopHtml() {
       <button class="btn primary small focusable" data-action="steamApply" data-fid="ban:steam">Restart Steam now</button></div>`;
   }
   banners += updateBannerHtml(st.update);
-  if (st.library.refreshing) banners += `<div class="banner"><div class="spinner"></div><div class="grow">Syncing your ${[st.accounts.epic && 'Epic', st.accounts.gog && 'GOG'].filter(Boolean).join(' and ')} library...</div></div>`;
+  if (st.library.refreshing) banners += `<div class="banner"><div class="spinner"></div><div class="grow">Syncing your ${[st.accounts.epic && 'Epic', st.accounts.gog && 'GOG', st.accounts.amazon && 'Amazon'].filter(Boolean).join(', ')} library...</div></div>`;
   if (st.library.error) banners += `<div class="banner error"><div class="grow">Library sync failed: ${esc(st.library.error)}</div>
     <button class="btn small focusable" data-action="refreshLib" data-fid="ban:retry">Retry</button></div>`;
   if (st.ratings_pending > 0 && st.settings.ratings_enabled) banners += `<div class="banner"><div class="spinner"></div>
@@ -1198,6 +1216,8 @@ function accountsHtml() {
       blurb: 'Weekly free games, plus everything you have bought or claimed on the Epic Games Store.' },
     { id: 'gog', name: 'GOG', user: acc.gog, login: 'loginGog', logout: 'logoutGog',
       blurb: 'DRM-free games - once installed they keep working even if you sign out.' },
+    { id: 'amazon', name: 'Amazon Games', user: acc.amazon, login: 'loginAmazon', logout: 'logoutAmazon',
+      blurb: 'Games from Prime Gaming and Amazon purchases. Sign in again if a game refuses to start.' },
   ];
   const cards = stores.map((s) => {
     const owned = S.games.filter((g) => g.store === s.id);
@@ -1205,7 +1225,7 @@ function accountsHtml() {
     const stats = s.user ? `${owned.length} game${owned.length === 1 ? '' : 's'} in your library · ${inst} installed` : esc(s.blurb);
     const btn = s.user
       ? `<button class="btn danger focusable" data-action="${s.logout}" data-fid="acc:${s.id}:out">Sign out</button>`
-      : `<button class="btn primary focusable" data-action="${s.login}" data-fid="acc:${s.id}:in" ${!acc.epic && !acc.gog && s.id === 'epic' ? 'data-autofocus' : ''}>Sign in</button>`;
+      : `<button class="btn primary focusable" data-action="${s.login}" data-fid="acc:${s.id}:in" ${!acc.epic && !acc.gog && !acc.amazon && s.id === 'epic' ? 'data-autofocus' : ''}>Sign in</button>`;
     return `<div class="acct ${s.user ? 'on' : ''}">
       <div class="acct-head"><span class="store s-${s.id}">${STORE_NAME[s.id]}</span><h2>${s.name}</h2></div>
       <div class="acct-status">${s.user ? `<span class="dot good"></span>Signed in as <b>${esc(s.user)}</b>` : '<span class="dot"></span>Not signed in'}</div>
@@ -1215,7 +1235,7 @@ function accountsHtml() {
   }).join('');
   return `<div class="page">
     <div class="toolbar"><h2 style="margin:0">Accounts</h2><div class="spacer"></div>
-      ${acc.epic || acc.gog ? `<button class="btn small focusable" data-action="refreshLib" data-fid="acc:sync">${lib.refreshing ? 'Syncing...' : 'Sync libraries'}</button>` : ''}</div>
+      ${acc.epic || acc.gog || acc.amazon ? `<button class="btn small focusable" data-action="refreshLib" data-fid="acc:sync">${lib.refreshing ? 'Syncing...' : 'Sync libraries'}</button>` : ''}</div>
     <div class="acct-grid">${cards}</div>
     <div class="settings" style="margin-top:22px">
       <div class="setting focusable" data-action="loginMore" data-fid="acc:code"><div class="grow"><div class="t">Sign in with a code</div>
@@ -1326,7 +1346,7 @@ function settingsHtml() {
     ${act('updateAll', 'Update all games', 'Queue updates for every installed game that has one', 'Update all')}
     <h3>Playing</h3>
     ${isWin() ? '' : sel('default_proton', 'Default Proton version', 'Used for games without their own Proton setting', protonName || 'GE-Proton')}
-    ${tog('cloud_saves', 'Cloud saves', 'Sync Epic and GOG cloud saves before and after playing')}
+    ${tog('cloud_saves', 'Cloud saves', 'Sync Epic and GOG cloud saves before and after playing (Amazon has none)')}
     ${tog('hide_while_playing', 'Hide PlayVault while a game runs', 'Keeps the game in front; PlayVault comes back when the game exits')}
     ${tog('skip_update_check', 'Allow launching out-of-date games', 'Play even if an update is pending (online games may refuse)')}
     ${isWin() ? '' : act('prepare', 'Prepare Proton now', 'Downloads the Steam runtime and Proton ahead of your first launch', 'Prepare')}
@@ -1341,7 +1361,7 @@ function settingsHtml() {
     ${sel('reviews_language', 'Steam review score', 'Which reviews the % is based on - updates all ratings in the background when changed', s.reviews_language === 'all' ? 'All languages' : 'English (like Steam)')}
     ${sel('country', 'Steam store region', 'Region used for Steam store lookups', (COUNTRIES.find((c) => c[0] === s.country) || [0, s.country])[1])}
     ${act('ratingsAll', 'Refresh all ratings', 'Re-fetch ratings for every game now', 'Refresh')}
-    ${act('refreshLib', 'Sync libraries', 'Re-download your owned games lists from Epic and GOG', 'Sync')}
+    ${act('refreshLib', 'Sync libraries', 'Re-download your owned games lists from Epic, GOG and Amazon', 'Sync')}
     ${tog('show_hidden', 'Show "Hidden" filter', 'Lets you browse and unhide hidden games')}
     ${sel('card_size', 'Cover size', 'Size of game covers in the library', { small: 'Small', medium: 'Medium', large: 'Large' }[s.card_size] || 'Medium')}
     ${isWin() ? '' : tog('delete_prefix_on_uninstall', 'Delete Proton prefix on uninstall (default)', 'Off keeps local saves when you uninstall')}
@@ -1349,8 +1369,8 @@ function settingsHtml() {
     ${drives || '<div class="setting"><div class="grow d">Loading...</div></div>'}
     ${installed.length ? `<h3>Installed games (${installed.length}) · ${fmtBytes(installed.reduce((a, g) => a + g.install_size, 0))}</h3>${instHtml}` : ''}
     <h3>Accounts</h3>
-    <div class="setting focusable" data-action="tab" data-tab="accounts" data-fid="s:accounts"><div class="grow"><div class="t">Epic & GOG accounts</div>
-      <div class="d">${[acc.epic && `Epic: ${esc(acc.epic)}`, acc.gog && `GOG: ${esc(acc.gog)}`].filter(Boolean).join(' · ') || 'Not signed in'}</div></div>
+    <div class="setting focusable" data-action="tab" data-tab="accounts" data-fid="s:accounts"><div class="grow"><div class="t">Epic, GOG & Amazon accounts</div>
+      <div class="d">${[acc.epic && `Epic: ${esc(acc.epic)}`, acc.gog && `GOG: ${esc(acc.gog)}`, acc.amazon && `Amazon: ${esc(acc.amazon)}`].filter(Boolean).join(' · ') || 'Not signed in'}</div></div>
       <span class="btn small">Manage</span></div>
     <h3>PlayVault updates</h3>
     ${sel('app_updates', 'Automatic updates', 'Checks GitHub for new PlayVault versions when PlayVault opens', { auto: 'Download automatically', ask: 'Ask first', off: 'Off' }[s.app_updates] || 'Download automatically')}
@@ -1360,7 +1380,7 @@ function settingsHtml() {
     ${S.state.update && S.state.update.notes && ['available', 'ready', 'needs_installer'].includes(S.state.update.status) ? act('updateNotes', "What's new", `Release notes for PlayVault ${esc(S.state.update.latest)}`, 'Show') : ''}
     <h3>About</h3>
     <div class="setting focusable" data-action="noop" data-fid="s:about"><div class="grow"><div class="t">PlayVault ${esc(S.state.app_version)}</div>
-      <div class="d">legendary ${esc(sys.legendary_version || '?')} · gogdl ${esc(sys.gogdl_version || 'missing')} · ${isWin() ? 'native games' : `umu ${sys.umu_path ? 'installed' : 'missing'}`} · Python ${esc(sys.python || '?')} ·
+      <div class="d">legendary ${esc(sys.legendary_version || '?')} · gogdl ${esc(sys.gogdl_version || 'missing')} · nile ${esc(sys.nile_version || 'missing')} · ${isWin() ? 'native games' : `umu ${sys.umu_path ? 'installed' : 'missing'}`} · Python ${esc(sys.python || '?')} ·
       Steam user ${esc(sys.steam_user || 'not found')} · ${isWin() ? 'Windows' : sys.game_mode ? 'Game Mode' : 'Desktop Mode'}<br>Data: ${esc(sys.data_dir || '')}</div></div></div>
     ${act('quit', 'Exit PlayVault', 'Downloads keep going in the background if enabled above', 'Exit')}
   </div>`;

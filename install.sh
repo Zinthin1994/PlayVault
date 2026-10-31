@@ -11,6 +11,7 @@ ELECTRON_VERSION="31.7.7"
 UMU_FALLBACK_VERSION="1.4.4"
 GOGDL_FALLBACK_VERSION="v1.3.0"
 LEGENDARY_URL="https://github.com/derrod/legendary/archive/refs/heads/master.zip"
+NILE_URL="https://github.com/imLinguin/nile/archive/refs/tags/v1.2.0.zip"
 
 SRC="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 ROOT="${PLAYVAULT_HOME:-$HOME/.local/share/playvault}"
@@ -86,6 +87,14 @@ if ! "$ROOT/venv/bin/python" -m pip install --quiet --upgrade "$LEGENDARY_URL"; 
   "$ROOT/venv/bin/python" -m pip install --quiet --upgrade legendary-gl || die "Could not install legendary"
 fi
 "$ROOT/venv/bin/legendary" --version || die "legendary did not install correctly"
+
+# ------------------------------------------------------------------ nile (Amazon Games client)
+bold "Installing nile (Amazon Games client)"
+if "$ROOT/venv/bin/python" -m pip install --quiet --upgrade "$NILE_URL" && [ -x "$ROOT/venv/bin/nile" ]; then
+  "$ROOT/venv/bin/nile" --version || true
+else
+  warn "Installing nile failed - Amazon Games support will be unavailable until you re-run the installer"
+fi
 
 # ------------------------------------------------------------------ gogdl (GOG client)
 bold "Installing gogdl (GOG client from Heroic)"

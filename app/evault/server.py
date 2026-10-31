@@ -82,7 +82,7 @@ class App:
     def _startup(self):
         self.legendary_version = legendary.version()
         self.gogdl_version = gog.version()
-        self.nile_version = amazon.version() if amazon.available() else None
+        self.nile_version = amazon.version() if amazon.ensure_installed() else None
         threading.Thread(target=self._gog_check_updates, daemon=True).start()
         threading.Thread(target=self._amazon_check_updates, daemon=True).start()
         stale = False
@@ -824,6 +824,8 @@ def route(method, p, q, body):
         if p == ['auth', 'amazon', 'url']:
             # starts a sign-in: remembers the PKCE data that the returned code belongs to
             try:
+                if not amazon.ensure_installed():
+                    raise RuntimeError('nile (Amazon Games client) could not be installed - check your internet connection')
                 return {'url': amazon.login_url()}
             except RuntimeError as e:
                 return {'error': str(e)}

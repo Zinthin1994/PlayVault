@@ -85,6 +85,31 @@ def popen(args):
                             stdin=subprocess.DEVNULL, **host.spawn_kwargs())
 
 
+NILE_URL = 'https://github.com/imLinguin/nile/archive/refs/tags/v1.2.0.zip'  # newer main is broken upstream
+_ensure_lock = threading.Lock()
+
+
+def ensure_installed():
+    """Self-updates only swap app/, never run the installer, so an install that predates
+    Amazon support gets nile here, into its own venv. Returns True if nile is usable."""
+    with _ensure_lock:
+        if available():
+            return True
+        py = paths.VENV_PYTHON
+        if not os.path.exists(py):
+            return False
+        log.info('Installing nile (Amazon Games client) into the PlayVault venv')
+        try:
+            p = subprocess.run([py, '-m', 'pip', 'install', '--quiet', '--upgrade', NILE_URL],
+                               capture_output=True, text=True, timeout=600, stdin=subprocess.DEVNULL,
+                               **host.hidden_kwargs())
+            if p.returncode != 0:
+                log.warning('nile install failed: %s', tail(p.stderr or p.stdout, 400))
+        except Exception as e:
+            log.warning('nile install failed: %r', e)
+        return available()
+
+
 def version():
     rc, out, err = run(['--version'], timeout=30)
     return (out or err).strip().splitlines()[-1] if rc == 0 and (out or err).strip() else None

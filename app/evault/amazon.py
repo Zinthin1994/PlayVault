@@ -93,14 +93,18 @@ def ensure_installed():
     """Self-updates only swap app/, never run the installer, so an install that predates
     Amazon support gets nile here, into its own venv. Returns True if nile is usable."""
     with _ensure_lock:
+        broken = False
         if available():
-            return True
+            if version():
+                return True
+            broken = True  # present but crashes on start (e.g. the broken upstream main build)
         py = paths.VENV_PYTHON
         if not os.path.exists(py):
             return False
-        log.info('Installing nile (Amazon Games client) into the PlayVault venv')
+        log.info('%s nile (Amazon Games client) in the PlayVault venv', 'Repairing' if broken else 'Installing')
         try:
-            p = subprocess.run([py, '-m', 'pip', 'install', '--quiet', '--upgrade', NILE_URL],
+            p = subprocess.run([py, '-m', 'pip', 'install', '--quiet', '--upgrade'] +
+                               (['--force-reinstall', '--no-deps'] if broken else []) + [NILE_URL],
                                capture_output=True, text=True, timeout=600, stdin=subprocess.DEVNULL,
                                **host.hidden_kwargs())
             if p.returncode != 0:

@@ -1,13 +1,17 @@
-// Preload for the Epic / Google sign-in windows.
-// Adds a Cancel button and a built-in on-screen keyboard that pops up when a text field is
-// focused (the KDE / Steam keyboards don't reliably appear for this window). Keys are sent to
-// the main process, which types them as real (trusted) input so React/Google forms accept them.
+// Preload for the store sign-in windows (Epic / GOG / Amazon, and Google etc. popups).
+// Adds a Cancel button. On SteamOS it also offers a built-in on-screen keyboard (the KDE /
+// Steam keyboards don't reliably appear for this window); it opens only when asked for (Y, the
+// Keyboard button, or A on a text box), never by itself. Windows has a real keyboard, so there
+// is no on-screen keyboard there. Keys are sent to the main process, which types them as real
+// (trusted) input so React/Google forms accept them.
 // Controller: keyboard open -> D-pad/stick move, A press, B close, X backspace, Y space,
 //             LB shift, RB symbols, Start enter.
-//             keyboard closed -> D-pad next/previous field, A select, Y keyboard, B cancel.
+//             keyboard closed -> D-pad next/previous field, A select (opens the keyboard on a
+//             text box), Y keyboard, B cancel.
 const { ipcRenderer } = require('electron');
 
 const send = (msg) => ipcRenderer.send('osk', msg);
+const OSK = process.platform !== 'win32';
 
 const LETTERS = [
   ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'],
@@ -76,13 +80,14 @@ function build() {
   const cancel = document.createElement('button');
   cancel.className = 'btn';
   cancel.textContent = '✕  Cancel sign-in (B)';
-  bar.append(kbBtn, cancel);
+  if (OSK) bar.append(kbBtn);
+  bar.append(cancel);
   root.appendChild(bar);
 
   const tip = document.createElement('div');
   tip.className = 'tip';
-  tip.textContent = 'Select a text box to type - the keyboard pops up automatically';
-  root.appendChild(tip);
+  tip.textContent = 'Need to type? Press Y or select ⌨ Keyboard';
+  if (OSK) root.appendChild(tip);
 
   const kb = document.createElement('div');
   kb.className = 'kb';
@@ -150,16 +155,9 @@ function build() {
   kbBtn.addEventListener('mousedown', (e) => { e.preventDefault(); isOpen() ? hide() : show(); });
   cancel.addEventListener('click', () => send({ cancel: true }));
 
-  document.addEventListener('focusin', (e) => {
-    const t = e.composedPath ? e.composedPath()[0] : e.target;
-    if (isTextField(t)) show();
-  }, true);
-
   const reattach = () => { if (!host.isConnected) document.documentElement.appendChild(host); };
   document.documentElement.appendChild(host);
   setInterval(reattach, 1000);
-  // pages like Google autofocus their first field before this script runs
-  if (isTextField(document.activeElement)) show();
 
   // ---- controller
   function moveSel(dr, dc) {
@@ -195,7 +193,9 @@ function build() {
     const left = b(14) || ax(0) < -0.6;
     const right = b(15) || ax(0) > 0.6;
     if (pads.length && document.hasFocus()) {
-      if (isOpen()) {
+      if (!OSK) {
+        if (edge('b', b(1))) send({ cancel: true });
+      } else if (isOpen()) {
         if (edge('u', up, true)) moveSel(-1, 0);
         if (edge('d', down, true)) moveSel(1, 0);
         if (edge('l', left, true)) moveSel(0, -1);

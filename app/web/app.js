@@ -626,21 +626,28 @@ async function loginMore() {
   if (v === 'gog') doLoginGogCode();
   if (v === 'amazon') doLoginAmazonCode();
 }
+// A scannable QR code for a sign-in link, with the address in small print under it
+function qrBlock(url) {
+  let code = '';
+  try { code = window.QR ? `<span class="qr">${QR.svg(url)}</span>` : ''; } catch (e) { code = ''; }
+  return `${code}<span class="qr-url">${esc(url)}</span>`;
+}
+const GOG_LOGIN_URL = 'https://auth.gog.com/auth?client_id=46899977096215655&redirect_uri=https%3A%2F%2Fembed.gog.com%2Fon_login_success%3Forigin%3Dclient&response_type=code&layout=galaxy';
 async function doLoginAmazonCode() {
   const r = await safe(() => api('auth/amazon/url'));
   if (!r) return;
   if (r.error) { toast(r.error, 'error'); return; }
   const ok = await confirmBox({
     title: 'Sign in to Amazon Games with a code',
-    msg: 'On a phone or PC, open this address and sign in: <b>' + esc(r.url) + '</b><br>You end up on amazon.com - copy that page\'s full address (it contains <b>openid.oa2.authorization_code=</b>) and paste or type it on the next screen. Use it within a few minutes.',
+    msg: 'Scan this with your phone and sign in. You end up on amazon.com - its address contains <b>openid.oa2.authorization_code=</b>. Enter the value after it on the next screen (or the whole address). Use it within a few minutes.' + qrBlock(r.url),
     ok: 'Continue', cancel: 'Back',
   });
-  if (ok) submitCode(await keyboard({ title: 'Amazon address or code', hint: 'Paste the whole amazon.com address' }), 'amazon');
+  if (ok) submitCode(await keyboard({ title: 'Amazon code or address', hint: 'The value after openid.oa2.authorization_code=, or the whole amazon.com address' }), 'amazon');
 }
 async function doLoginGogCode() {
   const ok = await confirmBox({
     title: 'Sign in to GOG with a code',
-    msg: 'On a phone or PC, open <b>auth.gog.com/auth?client_id=46899977096215655&amp;response_type=code&amp;layout=galaxy&amp;redirect_uri=https%3A%2F%2Fembed.gog.com%2Fon_login_success%3Forigin%3Dclient</b> and sign in. You end up on a blank page - copy its address (it contains <b>code=</b>) and paste or type it on the next screen.',
+    msg: 'Scan this with your phone and sign in. You end up on a blank page - its address contains <b>code=</b>. Enter that code (or the whole address) on the next screen.' + qrBlock(GOG_LOGIN_URL),
     ok: 'Continue', cancel: 'Back',
   });
   if (ok) submitCode(await keyboard({ title: 'GOG code or address', hint: 'Paste the whole address or just the code value' }), 'gog');
@@ -648,7 +655,7 @@ async function doLoginGogCode() {
 async function doLoginCode() {
   await confirmBox({
     title: 'Sign in with a code',
-    msg: 'On a phone or PC, open <b>legendary.gl/epiclogin</b>, sign in, and copy the <b>authorizationCode</b> value (32 characters). Then type or paste it on the next screen.',
+    msg: 'Scan this with your phone, sign in, and note the <b>authorizationCode</b> value it shows (32 characters). Then type or paste it on the next screen.' + qrBlock('https://legendary.gl/epiclogin'),
     ok: 'Continue', cancel: 'Back',
   }) && submitCode(await keyboard({ title: 'Authorization code', hint: 'Paste or type the authorizationCode value' }));
 }

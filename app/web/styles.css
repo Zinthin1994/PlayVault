@@ -278,6 +278,9 @@ main::-webkit-scrollbar-thumb { background: #283247; border-radius: 4px; }
   max-height: 86vh; display: flex; flex-direction: column; box-shadow: 0 30px 80px rgba(0,0,0,.6); }
 .modal h2 { margin: 0 0 6px; font-size: 1.35rem; }
 .modal .msg { color: var(--muted); margin: 0 0 18px; line-height: 1.5; }
+.modal .msg .qr { display: block; width: min(300px, 60vh); margin: 14px auto 10px; border-radius: 10px; overflow: hidden; }
+.modal .msg .qr svg { display: block; width: 100%; height: auto; }
+.modal .msg .qr-url { display: block; font-size: .8rem; word-break: break-all; max-height: 4.6em; overflow: hidden; opacity: .8; }
 .modal .body { overflow-y: auto; margin: 0 -6px; padding: 6px; display: flex; flex-direction: column; gap: 8px; }
 .modal .foot { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; flex-wrap: wrap; }
 .opt { display: flex; align-items: center; gap: 14px; padding: 13px 16px; border-radius: 12px; background: var(--panel); }

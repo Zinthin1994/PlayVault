@@ -69,5 +69,20 @@ if [ -f "$U/ready.json" ] && [ -f "$U/app/bin/playvault" ] && [ ! -f "$U/trial.j
 fi
 
 export PLAYVAULT_ROOT="$ROOT" PLAYVAULT_APP="$APP" PLAYVAULT_HOME="$ROOT"
+
+# In Game Mode SteamOS points GTK_IM_MODULE / QT_IM_MODULE at Steam's input-method module,
+# which opens the Steam keyboard whenever a text box gains focus - and sign-in pages move focus
+# while you type, so it keeps popping up. PlayVault has its own keyboard (Y) and Steam + X still
+# opens Steam's by hand, so the module is switched off for the UI only. The original values are
+# kept in PLAYVAULT_ORIG_* and given back to games launched from PlayVault (electron/main.js).
+if [ "${XDG_CURRENT_DESKTOP,,}" = gamescope ] || [ -n "${GAMESCOPE_WAYLAND_DISPLAY:-}" ] || [ "${SteamGamepadUI:-}" = 1 ]; then
+  echo "$(date '+%F %T') Game Mode: GTK_IM_MODULE=${GTK_IM_MODULE-<unset>} QT_IM_MODULE=${QT_IM_MODULE-<unset>} XMODIFIERS=${XMODIFIERS-<unset>} - Steam keyboard hook off for the UI" \
+    >>"$ROOT/data/logs/electron.log"
+  export PLAYVAULT_ORIG_GTK_IM_MODULE="${GTK_IM_MODULE-__unset__}" PLAYVAULT_ORIG_QT_IM_MODULE="${QT_IM_MODULE-__unset__}" \
+    PLAYVAULT_ORIG_XMODIFIERS="${XMODIFIERS-__unset__}"
+  export GTK_IM_MODULE=gtk-im-context-simple QT_IM_MODULE=compose
+  unset XMODIFIERS
+fi
+
 exec "$ROOT/electron/electron" --no-sandbox --ozone-platform=x11 "$APP/electron" "$@" \
   >>"$ROOT/data/logs/electron.log" 2>&1

@@ -236,7 +236,19 @@ function storeLogin(storeId) {
   });
 }
 
-uiHandle('store-login', (e, storeId) => storeLogin(storeId || 'epic'));
+// bin/playvault turns Steam's keyboard hook off for the UI in Game Mode; games get it back
+function gameEnv() {
+  const env = { ...process.env };
+  for (const k of ['GTK_IM_MODULE', 'QT_IM_MODULE', 'XMODIFIERS']) {
+    const orig = env[`PLAYVAULT_ORIG_${k}`];
+    if (orig === undefined) continue;
+    if (orig === '__unset__') delete env[k]; else env[k] = orig;
+    delete env[`PLAYVAULT_ORIG_${k}`];
+  }
+  return env;
+}
+
+uiHandle('store-login',(e, storeId) => storeLogin(storeId || 'epic'));
 uiHandle('epic-login', () => storeLogin('epic'));
 // Games are spawned from this process (not the backend) so they inherit the current
 // Game Mode session environment (display, Steam overlay, gamescope app id).
@@ -252,7 +264,7 @@ uiHandle('launch', (e, appName) => {
       cwd: ROOT, detached: true, stdio: 'ignore', windowsHide: true,
       env: { ...process.env, PYTHONPATH: APP_DIR, PLAYVAULT_HOME: ROOT },
     })
-    : spawn(script, [appName], { cwd: ROOT, detached: true, stdio: 'ignore', env: process.env });
+    : spawn(script, [appName], { cwd: ROOT, detached: true, stdio: 'ignore', env: gameEnv() });
   child.unref();
   return { ok: true };
 });

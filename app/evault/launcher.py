@@ -65,6 +65,13 @@ def _split(args):
 
 
 def _clean_env(env):
+    # bin/playvault switches Steam's keyboard hook off for the UI in Game Mode; games get it back
+    for k in ('GTK_IM_MODULE', 'QT_IM_MODULE', 'XMODIFIERS'):
+        orig = env.pop(f'PLAYVAULT_ORIG_{k}', None)
+        if orig == '__unset__':
+            env.pop(k, None)
+        elif orig is not None:
+            env[k] = orig
     for k in list(env):
         if k.startswith(('ELECTRON_', 'CHROME_')) or k in ('PYTHONPATH', 'PYTHONHOME', 'VIRTUAL_ENV',
                                                            'LEGENDARY_CONFIG_PATH'):

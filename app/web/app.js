@@ -326,6 +326,9 @@ const BTN = { 0: 'a', 1: 'b', 2: 'x', 3: 'y', 4: 'lb', 5: 'rb', 8: 'view', 9: 'm
 const DIRS = ['up', 'down', 'left', 'right'];
 let gpPrev = {}, gpNext = {};
 function gpLoop(ts) {
+  // Every window reads the controller, and this one keeps running while a store sign-in
+  // window covers it (Game Mode shows one window at a time). Without this, A / D-pad presses
+  // meant for the sign-in window also "click" whatever is selected here, unseen.
   const pads = navigator.getGamepads ? Array.from(navigator.getGamepads()).filter(Boolean) : [];
   const now = {};
   let scrollY = 0;
@@ -336,6 +339,12 @@ function gpLoop(ts) {
     if (ax < -0.6) now.left = true; if (ax > 0.6) now.right = true;
     const ry = p.axes.length > 3 ? p.axes[3] : 0;
     if (Math.abs(ry) > 0.25) scrollY = ry;
+  }
+  // (also while hidden for a running game, so in-game presses don't reach it either)
+  if (S.loginOpen || document.hidden) {
+    gpPrev = now;  // buttons still held when control comes back are not new presses
+    requestAnimationFrame(gpLoop);
+    return;
   }
   for (const k of Object.keys(now)) {
     if (!gpPrev[k]) { press(k); gpNext[k] = ts + 400; }
@@ -613,7 +622,13 @@ async function submitCode(code, store = 'epic') {
   else if (r) toast(r.message || 'Sign-in failed', 'error');
 }
 async function doLogin(store = 'epic') {
-  const r = await window.vault.login(store);
+  if (S.loginOpen) return;
+  S.loginOpen = true;
+  let r;
+  try { r = await window.vault.login(store); } finally {
+    // the button that closed the sign-in window may still be held: skip it here
+    setTimeout(() => { S.loginOpen = false; }, 400);
+  }
   if (r && r.code) submitCode(r.code, store);
   else if (r && r.error) toast(r.error, 'error');
 }

@@ -12,7 +12,7 @@ import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import VERSION, amazon, gog, host, legendary, paths, proton, ratings as ratings_mod, steam, store, system, umu
+from . import VERSION, amazon, gog, host, legendary, paths, proton, ratings as ratings_mod, remote, steam, store, system, umu
 from .jobs import JobManager
 from .updater import Updater
 from .util import read_json, write_json, pid_alive, log
@@ -71,8 +71,13 @@ class App:
         self.ratings.enabled = s.get('ratings_enabled', True)
         self.jobs = JobManager(on_change=self.bump, on_done=self.on_job_done)
         self.updater = Updater(on_change=self.bump)
+        self.remote = remote.RemoteLogin(on_login=self._remote_done)
         threading.Thread(target=self._startup, daemon=True).start()
         threading.Thread(target=self._watchdog, daemon=True).start()
+
+    def _remote_done(self, store_id):
+        _bg(self.refresh_library)
+        self.bump()
 
     def bump(self):
         with self.lock:
@@ -829,6 +834,8 @@ def route(method, p, q, body):
                 return {'url': amazon.login_url()}
             except RuntimeError as e:
                 return {'error': str(e)}
+        if p == ['auth', 'remote', 'status']:
+            return a.remote.status()
         if p == ['update']:
             return a.updater.snapshot()
         return None
@@ -863,6 +870,11 @@ def route(method, p, q, body):
     if p == ['auth', 'amazon', 'logout']:
         amazon.logout()
         a.bump()
+        return {'ok': True}
+    if p == ['auth', 'remote', 'start']:
+        return a.remote.start(body.get('store', ''))
+    if p == ['auth', 'remote', 'stop']:
+        a.remote.stop()
         return {'ok': True}
     if p == ['library', 'refresh']:
         _bg(a.refresh_library, bool(body.get('force')))

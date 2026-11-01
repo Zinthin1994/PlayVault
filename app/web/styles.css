@@ -307,3 +307,5 @@ main::-webkit-scrollbar-thumb { background: #283247; border-radius: 4px; }
   max-width: 460px; box-shadow: 0 12px 30px rgba(0,0,0,.5); animation: slide .2s ease; }
 .toast.error { border-left-color: var(--bad); } .toast.good { border-left-color: var(--good); }
 @keyframes slide { from { transform: translateY(12px); opacity: 0; } }
+
+.modal .phone-status { text-align: center; color: var(--muted); margin: 4px 0 2px; }

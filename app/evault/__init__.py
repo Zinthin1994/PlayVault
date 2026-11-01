@@ -1,3 +1,3 @@
 """PlayVault - a controller-first Epic Games Store + GOG library for SteamOS Game Mode."""
 
-VERSION = '1.4.5'
+VERSION = '1.5.0'

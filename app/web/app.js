@@ -294,6 +294,8 @@ const ACTIONS = {
   loginAmazonCode: () => doLoginAmazonCode(),
   logoutAmazon: async () => { if (await confirmBox({ title: 'Sign out of Amazon Games?', msg: 'Installed Amazon games stay on disk, but need you to sign in again to launch.', ok: 'Sign out', danger: true })) { await safe(() => api('auth/amazon/logout', {})); tick(); } },
   loginMore: () => loginMore(),
+  phoneLogin: (d) => doPhoneLogin(d.store),
+  phoneLoginPick: () => phoneLoginPick(),
   logoutGog: async () => { if (await confirmBox({ title: 'Sign out of GOG?', msg: 'Installed GOG games stay on disk and keep working.', ok: 'Sign out', danger: true })) { await safe(() => api('auth/gog/logout', {})); tick(); } },
   setting: (d) => editSetting(d.key),
   toggleSetting: (d) => safe(() => saveSetting(d.key, !S.state.settings[d.key])),
@@ -607,10 +609,12 @@ function renderLogin() {
       ${window.vault ? `<button class="btn primary big focusable" data-action="login" data-fid="login" data-autofocus>Sign in with Epic Games</button>
       <button class="btn primary big focusable" data-action="loginGog" data-fid="login-gog">Sign in with GOG</button>
       <button class="btn primary big focusable" data-action="loginAmazon" data-fid="login-amazon">Sign in with Amazon Games</button>` : ''}
+      ${!isWin() ? `<button class="btn primary big focusable" data-action="phoneLoginPick" data-fid="login-phone">Sign in with your phone</button>` : ''}
       <button class="btn focusable" data-action="loginMore" data-fid="code">Sign in with a code instead</button>
       <button class="btn focusable" data-action="quit" data-fid="quit">Exit</button>
     </div>
-    <p style="margin-top:26px;font-size:.85rem">The sign-in window has its own keyboard - it pops up when you select a text box.
+    <p style="margin-top:26px;font-size:.85rem">${isWin() ? 'The sign-in window opens here - type with your keyboard.'
+      : 'Easiest: "Sign in with your phone" shows a QR code - you type on your phone, not with the controller.'}
       Signing in once from Desktop Mode also works - PlayVault remembers you.</p>
   </div></div>`;
 }
@@ -631,6 +635,47 @@ async function doLogin(store = 'epic') {
   }
   if (r && r.code) submitCode(r.code, store);
   else if (r && r.error) toast(r.error, 'error');
+}
+const STORE_FULL = { epic: 'Epic Games', gog: 'GOG', amazon: 'Amazon Games' };
+async function phoneLoginPick() {
+  const v = await choose({ title: 'Sign in with your phone', msg: 'Which store?', options: [
+    { value: 'epic', label: 'Epic Games' }, { value: 'gog', label: 'GOG' }, { value: 'amazon', label: 'Amazon Games' }] });
+  if (v) doPhoneLogin(v);
+}
+// Shows a QR code that opens a sign-in page on the phone (evault/remote.py); the phone does the
+// typing and this screen just waits until the backend reports the account is signed in.
+async function doPhoneLogin(store) {
+  if (!store || S.phoneLogin) return;
+  S.phoneLogin = true;
+  if (store === 'amazon') toast('Getting the QR code ready...');
+  const r = await safe(() => api('auth/remote/start', { store }));
+  if (!r || r.error) { S.phoneLogin = false; if (r) toast(r.error, 'error'); return; }
+  let done = false, timer = null, m = null;
+  const finish = () => {
+    if (done) return;
+    done = true; S.phoneLogin = false;
+    clearInterval(timer);
+    api('auth/remote/stop', {}).catch(() => {});
+  };
+  const close = () => { finish(); if (topModal() === m) closeModal(true); };
+  m = openModal({
+    title: `Sign in to ${STORE_FULL[store]} with your phone`,
+    msg: 'Scan this with your phone\'s camera and follow the steps on your phone. Your phone must be on the same Wi-Fi as this Steam Machine. Nothing needs to be typed here.' + qrBlock(r.url),
+    body: '<div class="phone-status">Waiting for your phone...</div>',
+    foot: '<button class="btn focusable" data-action="m" data-k="cancel" data-fid="cancel" data-autofocus>Cancel</button>',
+    handlers: { cancel: close },
+    onClose: finish,
+  });
+  timer = setInterval(async () => {
+    let st;
+    try { st = await api('auth/remote/status'); } catch (e) { return; }
+    if (done) return;
+    if (st.active && st.status === 'done') { close(); toast(`Signed in to ${STORE_NAME[store]} as ${st.message}`, 'good'); tick(); return; }
+    if (!st.active || st.status === 'expired' || st.status === 'failed') { close(); toast(st.message || 'The phone sign-in ended', 'error'); return; }
+    const el = m.el.querySelector('.phone-status');
+    if (el) el.textContent = st.status === 'working' ? 'Signing in...'
+      : st.message ? `Not signed in yet: ${st.message}` : `Waiting for your phone... (${Math.max(1, Math.ceil(st.expires_in / 60))} min left)`;
+  }, 1500);
 }
 async function loginMore() {
   const v = await choose({ title: 'Sign in with a code', options: [
@@ -1247,7 +1292,9 @@ function accountsHtml() {
     const stats = s.user ? `${owned.length} game${owned.length === 1 ? '' : 's'} in your library · ${inst} installed` : esc(s.blurb);
     const btn = s.user
       ? `<button class="btn danger focusable" data-action="${s.logout}" data-fid="acc:${s.id}:out">Sign out</button>`
-      : `<button class="btn primary focusable" data-action="${s.login}" data-fid="acc:${s.id}:in" ${!acc.epic && !acc.gog && !acc.amazon && s.id === 'epic' ? 'data-autofocus' : ''}>Sign in</button>`;
+      : isWin() ? `<button class="btn primary focusable" data-action="${s.login}" data-fid="acc:${s.id}:in" ${!acc.epic && !acc.gog && !acc.amazon && s.id === 'epic' ? 'data-autofocus' : ''}>Sign in</button>`
+      : `<button class="btn primary focusable" data-action="phoneLogin" data-store="${s.id}" data-fid="acc:${s.id}:phone" ${!acc.epic && !acc.gog && !acc.amazon && s.id === 'epic' ? 'data-autofocus' : ''}>Sign in with phone</button>
+         <button class="btn focusable" data-action="${s.login}" data-fid="acc:${s.id}:in">Sign in here</button>`;
     return `<div class="acct ${s.user ? 'on' : ''}">
       <div class="acct-head"><span class="store s-${s.id}">${STORE_NAME[s.id]}</span><h2>${s.name}</h2></div>
       <div class="acct-status">${s.user ? `<span class="dot good"></span>Signed in as <b>${esc(s.user)}</b>` : '<span class="dot"></span>Not signed in'}</div>
